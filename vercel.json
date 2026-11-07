@@ -10,6 +10,9 @@
   "functions": {
     "api/team-message.js": {
       "maxDuration": 30
+    },
+    "api/laporan-bridge.js": {
+      "maxDuration": 30
     }
   }
 }
