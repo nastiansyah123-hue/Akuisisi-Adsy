@@ -223,8 +223,8 @@ export function createLaporanBridgeHandler() {
         }
 
         if (action === 'reports') {
-          const start = url.searchParams.get('start');
-          const end = url.searchParams.get('end');
+          const start = reqUrl.searchParams.get('start');
+          const end = reqUrl.searchParams.get('end');
           const params = { cs: `eq.${cs.nama}`, select: '*', order: 'date.desc' };
           if (start) params.date = end ? `gte.${start}` : `eq.${start}`;
           // For range filter, use 'and' syntax
@@ -249,9 +249,9 @@ export function createLaporanBridgeHandler() {
         }
 
         if (action === 'ads') {
-          const start = url.searchParams.get('start');
-          const end = url.searchParams.get('end');
-          const product = url.searchParams.get('product');
+          const start = reqUrl.searchParams.get('start');
+          const end = reqUrl.searchParams.get('end');
+          const product = reqUrl.searchParams.get('product');
           const params = { select: '*' };
           if (product) params.product = `eq.${product}`;
           if (start && end) params.and = `(date.gte.${start},date.lte.${end})`;
