@@ -45,7 +45,7 @@ async function fetchCSList(env) {
   const key = env.CSORDER_SUPABASE_SERVICE_KEY;
   if (!url || !key) return [];
   try {
-    const q = new URLSearchParams({ aktif: 'eq.true', select: 'nama,email', order: 'nama.asc' });
+    const q = new URLSearchParams({ aktif: 'eq.true', role: 'eq.cs', select: 'nama,email', order: 'nama.asc' });
     const res = await fetch(`${url}/rest/v1/cs_profiles?${q}`, {
       headers: { apikey: key, Authorization: `Bearer ${key}` },
       signal: AbortSignal.timeout(8000)
