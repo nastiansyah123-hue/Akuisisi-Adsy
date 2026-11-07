@@ -1,0 +1,22 @@
+{
+  "name": "akuisisi-hub",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "test": "node --test src/*.test.js server/*.test.js",
+    "test:db": "node supabase/tests/pricing.mjs && node supabase/tests/packages.mjs && node supabase/tests/leads.mjs && node supabase/tests/unified.mjs && node supabase/tests/signup.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.80.0",
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.15",
+    "vite": "^6.4.0"
+  }
+}

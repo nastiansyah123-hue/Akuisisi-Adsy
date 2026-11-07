@@ -1,0 +1,1 @@
+export async function readAllRows(client,table,batchSize=500){const rows=[];for(let offset=0;;offset+=batchSize){const{data,error}=await client.from(table).select('*').order('id',{ascending:true}).range(offset,offset+batchSize-1);if(error)throw error;rows.push(...data);if(data.length<batchSize)return rows;}}
