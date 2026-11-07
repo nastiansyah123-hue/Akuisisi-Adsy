@@ -1,7 +1,7 @@
 import {readAllRows} from './remoteRows';
 import {createClient} from '@supabase/supabase-js';
 export const supabase=import.meta.env.VITE_SUPABASE_URL&&import.meta.env.VITE_SUPABASE_ANON_KEY?createClient(import.meta.env.VITE_SUPABASE_URL,import.meta.env.VITE_SUPABASE_ANON_KEY):null;
-export async function loadRemote(){const out={};for(const t of ['reports','ads','assignments','catalog','packageCorrections','leadReports','profiles']){out[t]=await readAllRows(supabase,t);}return out;}
+export async function loadRemote(){const tables=['reports','ads','assignments','catalog','packageCorrections','leadReports','profiles'];const results=await Promise.all(tables.map(t=>readAllRows(supabase,t)));return Object.fromEntries(tables.map((t,i)=>[t,results[i]]));}
 export async function saveRemote(table,value,existing){const {data,error}=await (existing?supabase.from(table).update(value).eq('id',value.id):supabase.from(table).insert(value)).select().single();if(error)throw error;return data;}
 
 export async function fetchCSNames(){
@@ -16,6 +16,21 @@ export async function fetchCSNames(){
     if(!res.ok)return[];
     const data=await res.json();
     return(data.csNames||[]).map(p=>p.nama).filter(Boolean);
+  }catch{return[];}
+}
+
+export async function fetchAdvNames(){
+  if(!supabase)return[];
+  try{
+    const session=await supabase.auth.getSession();
+    const token=session?.data?.session?.access_token;
+    if(!token)return[];
+    const res=await fetch('/api/laporan-bridge?action=adv-list',{
+      headers:{'X-Admin-Token':token,'Content-Type':'application/json'}
+    });
+    if(!res.ok)return[];
+    const data=await res.json();
+    return(data.advNames||[]).map(p=>p.name).filter(Boolean);
   }catch{return[];}
 }
 
