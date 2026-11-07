@@ -1,5 +1,5 @@
-// Laporan Bridge — connects CS Order (Supabase A) with Laporan Akuisisi (Supabase B).
-// CS Order frontend calls these endpoints; auth verified via Supabase A token.
+// Laporan Bridge — connects CS Order (Supabase A), Adsy Autopilot (Supabase C)
+// with Laporan Akuisisi (Supabase B). Auth verified via respective Supabase tokens.
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
   status,
@@ -81,6 +81,33 @@ async function verifyCSToken(env, token) {
   } catch { return null; }
 }
 
+// Verify advertiser token against Autopilot Supabase (Supabase C)
+async function verifyAdvertiserToken(env, token) {
+  const url = (env.AUTOPILOT_SUPABASE_URL || '').replace(/\/$/, '');
+  const key = env.AUTOPILOT_SUPABASE_SERVICE_KEY;
+  if (!url || !key) return null;
+  try {
+    const res = await fetch(`${url}/auth/v1/user`, {
+      headers: { apikey: key, Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(5000)
+    });
+    if (!res.ok) return null;
+    const user = await res.json();
+    if (typeof user.id !== 'string') return null;
+    const q = new URLSearchParams({ id: `eq.${user.id}`, select: 'name,email,role,status', limit: '1' });
+    const pRes = await fetch(`${url}/rest/v1/profiles?${q}`, {
+      headers: { apikey: key, Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(5000)
+    });
+    if (!pRes.ok) return null;
+    const profiles = await pRes.json();
+    const p = profiles[0];
+    if (!p || p.status !== 'active') return null;
+    if (!['advertiser', 'admin', 'superadmin'].includes(p.role)) return null;
+    return { id: user.id, name: p.name, email: p.email, role: p.role };
+  } catch { return null; }
+}
+
 function laporanClient(env) {
   const url = (env.LAPORAN_SUPABASE_URL || env.VITE_SUPABASE_URL || '').replace(/\/$/, '');
   const key = env.LAPORAN_SUPABASE_SERVICE_KEY || env.SUPABASE_ANON_KEY || env.VITE_SUPABASE_ANON_KEY;
@@ -157,7 +184,7 @@ export function createLaporanBridgeHandler() {
         headers: {
           'Access-Control-Allow-Origin': '*',
           'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, X-CS-Token, X-Admin-Token',
+          'Access-Control-Allow-Headers': 'Content-Type, X-CS-Token, X-Admin-Token, X-Advertiser-Token',
           'Access-Control-Max-Age': '86400'
         }
       });
@@ -187,6 +214,122 @@ export function createLaporanBridgeHandler() {
         return respond({ csNames: list });
       } catch (err) {
         return respond({ error: err.message || 'Gagal memuat daftar CS' }, 500);
+      }
+    }
+
+    // ── Advertiser actions (auth via Autopilot Supabase C) ──
+    const advToken = request.headers.get('X-Advertiser-Token');
+    if (advToken) {
+      const adv = await verifyAdvertiserToken(env, advToken);
+      if (!adv) return respond({ error: 'Token advertiser tidak valid atau tidak aktif' }, 401);
+
+      try {
+        if (request.method === 'GET') {
+          if (action === 'adv-init') {
+            const start = reqUrl.searchParams.get('start');
+            const end = reqUrl.searchParams.get('end');
+            const [assignments, catalog, reports, ads] = await Promise.all([
+              db.query('assignments', {
+                advertiser: `eq.${adv.name}`, active: 'eq.true',
+                select: 'id,cs,product,advertiser,channel'
+              }),
+              db.query('catalog', { select: 'id,name,unit,packages' }),
+              start && end
+                ? db.query('reports', {
+                    advertiser: `eq.${adv.name}`, select: '*', order: 'date.desc',
+                    and: `(date.gte.${start},date.lte.${end})`
+                  })
+                : db.query('reports', {
+                    advertiser: `eq.${adv.name}`, select: '*', order: 'date.desc'
+                  }),
+              start && end
+                ? db.query('ads', {
+                    advertiser: `eq.${adv.name}`, select: '*', order: 'date.desc',
+                    and: `(date.gte.${start},date.lte.${end})`
+                  })
+                : db.query('ads', {
+                    advertiser: `eq.${adv.name}`, select: '*', order: 'date.desc'
+                  })
+            ]);
+            const reportIds = reports.map(r => r.id);
+            const leadReports = reportIds.length
+              ? await db.query('leadReports', { reportId: `in.(${reportIds.join(',')})`, select: '*' })
+              : [];
+            return respond({ ok: true, advertiser: adv.name, email: adv.email, assignments, catalog, reports, leadReports, ads });
+          }
+
+          if (action === 'adv-reports') {
+            const start = reqUrl.searchParams.get('start');
+            const end = reqUrl.searchParams.get('end');
+            const params = { advertiser: `eq.${adv.name}`, select: '*', order: 'date.desc' };
+            if (start && end) params.and = `(date.gte.${start},date.lte.${end})`;
+            const reports = await db.query('reports', params);
+            const reportIds = reports.map(r => r.id);
+            const leadReports = reportIds.length
+              ? await db.query('leadReports', { reportId: `in.(${reportIds.join(',')})`, select: '*' })
+              : [];
+            return respond({ reports, leadReports });
+          }
+
+          if (action === 'adv-ads') {
+            const start = reqUrl.searchParams.get('start');
+            const end = reqUrl.searchParams.get('end');
+            const params = { advertiser: `eq.${adv.name}`, select: '*', order: 'date.desc' };
+            if (start && end) params.and = `(date.gte.${start},date.lte.${end})`;
+            const ads = await db.query('ads', params);
+            return respond({ ads });
+          }
+
+          return respond({ error: 'Action tidak dikenal' }, 400);
+        }
+
+        if (request.method === 'POST') {
+          const body = await request.json();
+
+          if (action === 'save-ads') {
+            const { ad } = body;
+            if (!ad) return respond({ error: 'Data biaya iklan diperlukan' }, 400);
+            if (!ad.date || !ad.product || !ad.channel) {
+              return respond({ error: 'Lengkapi tanggal, produk, dan channel.' }, 400);
+            }
+            const budget = Number(ad.budget);
+            const tax = Number(ad.tax ?? 11);
+            if (!Number.isFinite(budget) || budget < 0) {
+              return respond({ error: 'Biaya iklan harus nol atau lebih.' }, 400);
+            }
+            if (!Number.isFinite(tax) || tax < 0 || tax > 100) {
+              return respond({ error: 'Pajak harus antara 0 dan 100 persen.' }, 400);
+            }
+            if (!['Web', 'CTWA'].includes(ad.channel)) {
+              return respond({ error: 'Channel harus Web atau CTWA.' }, 400);
+            }
+            // Verify assignment exists
+            const assign = await db.query('assignments', {
+              product: `eq.${ad.product}`, advertiser: `eq.${adv.name}`,
+              channel: `eq.${ad.channel}`, active: 'eq.true',
+              select: 'id', limit: '1'
+            });
+            if (!assign.length) return respond({ error: 'Tidak ada penugasan aktif untuk kombinasi ini.' }, 400);
+
+            await db.upsert('ads', {
+              id: ad.id || crypto.randomUUID(),
+              date: ad.date,
+              product: ad.product,
+              advertiser: adv.name,
+              channel: ad.channel,
+              budget,
+              tax
+            }, 'date,product,advertiser,channel');
+
+            return respond({ ok: true });
+          }
+
+          return respond({ error: 'Action tidak dikenal' }, 400);
+        }
+
+        return respond({ error: 'Method tidak didukung' }, 405);
+      } catch (err) {
+        return respond({ error: err.message || 'Internal error' }, 500);
       }
     }
 
