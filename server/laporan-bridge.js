@@ -200,6 +200,32 @@ export function createLaporanBridgeHandler() {
     try {
       // ── GET actions ──
       if (request.method === 'GET') {
+        if (action === 'init') {
+          // Combined verify + catalog + reports in one request (reduces cold starts)
+          const start = reqUrl.searchParams.get('start');
+          const end = reqUrl.searchParams.get('end');
+          const [assignments, catalog, reports] = await Promise.all([
+            db.query('assignments', {
+              cs: `eq.${cs.nama}`, active: 'eq.true',
+              select: 'id,cs,product,advertiser,channel'
+            }),
+            db.query('catalog', { select: 'id,name,unit,packages' }),
+            start && end
+              ? db.query('reports', {
+                  cs: `eq.${cs.nama}`, select: '*', order: 'date.desc',
+                  and: `(date.gte.${start},date.lte.${end})`
+                })
+              : db.query('reports', {
+                  cs: `eq.${cs.nama}`, select: '*', order: 'date.desc'
+                })
+          ]);
+          const reportIds = reports.map(r => r.id);
+          const leadReports = reportIds.length
+            ? await db.query('leadReports', { reportId: `in.(${reportIds.join(',')})`, select: '*' })
+            : [];
+          return respond({ ok: true, cs: cs.nama, email: cs.email, assignments, catalog, reports, leadReports });
+        }
+
         if (action === 'verify') {
           // Check if CS has assignments in Laporan Akuisisi
           const assignments = await db.query('assignments', {
