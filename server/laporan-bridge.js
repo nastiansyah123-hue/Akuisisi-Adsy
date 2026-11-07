@@ -178,12 +178,16 @@ export function createLaporanBridgeHandler() {
 
     // ── Admin-only actions (auth via Laporan Akuisisi Supabase) ──
     if (action === 'cs-list') {
-      const adminToken = request.headers.get('X-Admin-Token');
-      if (!adminToken) return respond({ error: 'Admin token diperlukan' }, 401);
-      const admin = await verifyAdminToken(env, adminToken);
-      if (!admin) return respond({ error: 'Bukan admin atau token tidak valid' }, 403);
-      const list = await fetchCSList(env);
-      return respond({ csNames: list });
+      try {
+        const adminToken = request.headers.get('X-Admin-Token');
+        if (!adminToken) return respond({ error: 'Admin token diperlukan' }, 401);
+        const admin = await verifyAdminToken(env, adminToken);
+        if (!admin) return respond({ error: 'Bukan admin atau token tidak valid' }, 403);
+        const list = await fetchCSList(env);
+        return respond({ csNames: list });
+      } catch (err) {
+        return respond({ error: err.message || 'Gagal memuat daftar CS' }, 500);
+      }
     }
 
     // ── CS actions (auth via csorder Supabase) ──
