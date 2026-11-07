@@ -12,6 +12,49 @@ const json = (body, status = 200) => new Response(JSON.stringify(body), {
 
 const LEAD_KEYS = ['passive','consultation','priceShipping','ooc','casual','boughtElsewhere','other'];
 
+// Verify admin token against Laporan Akuisisi Supabase (Supabase B)
+async function verifyAdminToken(env, token) {
+  const url = (env.LAPORAN_SUPABASE_URL || env.VITE_SUPABASE_URL || '').replace(/\/$/, '');
+  const key = env.LAPORAN_SUPABASE_SERVICE_KEY || env.SUPABASE_ANON_KEY || env.VITE_SUPABASE_ANON_KEY;
+  if (!url || !key) return null;
+  try {
+    const res = await fetch(`${url}/auth/v1/user`, {
+      headers: { apikey: key, Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(5000)
+    });
+    if (!res.ok) return null;
+    const user = await res.json();
+    if (typeof user.id !== 'string') return null;
+    // Check profiles table for admin role
+    const q = new URLSearchParams({ id: `eq.${user.id}`, select: 'name,role', limit: '1' });
+    const pRes = await fetch(`${url}/rest/v1/profiles?${q}`, {
+      headers: { apikey: key, Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(5000)
+    });
+    if (!pRes.ok) return null;
+    const profiles = await pRes.json();
+    const p = profiles[0];
+    if (!p || p.role !== 'admin') return null;
+    return { id: user.id, name: p.name, role: p.role };
+  } catch { return null; }
+}
+
+// Fetch all active CS names from csorder Supabase (Supabase A)
+async function fetchCSList(env) {
+  const url = (env.CSORDER_SUPABASE_URL || '').replace(/\/$/, '');
+  const key = env.CSORDER_SUPABASE_SERVICE_KEY;
+  if (!url || !key) return [];
+  try {
+    const q = new URLSearchParams({ aktif: 'eq.true', select: 'nama,email', order: 'nama.asc' });
+    const res = await fetch(`${url}/rest/v1/cs_profiles?${q}`, {
+      headers: { apikey: key, Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(8000)
+    });
+    if (!res.ok) return [];
+    return res.json();
+  } catch { return []; }
+}
+
 async function verifyCSToken(env, token) {
   const url = (env.CSORDER_SUPABASE_URL || '').replace(/\/$/, '');
   const key = env.CSORDER_SUPABASE_SERVICE_KEY;
@@ -114,7 +157,7 @@ export function createLaporanBridgeHandler() {
         headers: {
           'Access-Control-Allow-Origin': '*',
           'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, X-CS-Token',
+          'Access-Control-Allow-Headers': 'Content-Type, X-CS-Token, X-Admin-Token',
           'Access-Control-Max-Age': '86400'
         }
       });
@@ -127,18 +170,28 @@ export function createLaporanBridgeHandler() {
       return r;
     };
 
-    // Auth: verify CS token from csorder Supabase
+    const db = laporanClient(env);
+    if (!db) return respond({ error: 'Database belum dikonfigurasi' }, 503);
+
+    const reqUrl = new URL(request.url);
+    const action = reqUrl.searchParams.get('action');
+
+    // ── Admin-only actions (auth via Laporan Akuisisi Supabase) ──
+    if (action === 'cs-list') {
+      const adminToken = request.headers.get('X-Admin-Token');
+      if (!adminToken) return respond({ error: 'Admin token diperlukan' }, 401);
+      const admin = await verifyAdminToken(env, adminToken);
+      if (!admin) return respond({ error: 'Bukan admin atau token tidak valid' }, 403);
+      const list = await fetchCSList(env);
+      return respond({ csNames: list });
+    }
+
+    // ── CS actions (auth via csorder Supabase) ──
     const token = request.headers.get('X-CS-Token');
     if (!token) return respond({ error: 'Token diperlukan' }, 401);
 
     const cs = await verifyCSToken(env, token);
     if (!cs) return respond({ error: 'Token tidak valid atau CS tidak aktif' }, 401);
-
-    const db = laporanClient(env);
-    if (!db) return respond({ error: 'Database belum dikonfigurasi' }, 503);
-
-    const url = new URL(request.url);
-    const action = url.searchParams.get('action');
 
     try {
       // ── GET actions ──
