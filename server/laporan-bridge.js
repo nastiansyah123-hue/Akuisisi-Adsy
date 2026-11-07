@@ -55,6 +55,22 @@ async function fetchCSList(env) {
   } catch { return []; }
 }
 
+// Fetch all active advertiser names from Autopilot Supabase (Supabase C)
+async function fetchAdvList(env) {
+  const url = (env.AUTOPILOT_SUPABASE_URL || '').replace(/\/$/, '');
+  const key = env.AUTOPILOT_SUPABASE_SERVICE_KEY;
+  if (!url || !key) return [];
+  try {
+    const q = new URLSearchParams({ status: 'eq.active', role: 'eq.advertiser', select: 'name,email', order: 'name.asc' });
+    const res = await fetch(`${url}/rest/v1/profiles?${q}`, {
+      headers: { apikey: key, Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(8000)
+    });
+    if (!res.ok) return [];
+    return res.json();
+  } catch { return []; }
+}
+
 async function verifyCSToken(env, token) {
   const url = (env.CSORDER_SUPABASE_URL || '').replace(/\/$/, '');
   const key = env.CSORDER_SUPABASE_SERVICE_KEY;
@@ -214,6 +230,19 @@ export function createLaporanBridgeHandler() {
         return respond({ csNames: list });
       } catch (err) {
         return respond({ error: err.message || 'Gagal memuat daftar CS' }, 500);
+      }
+    }
+
+    if (action === 'adv-list') {
+      try {
+        const adminToken = request.headers.get('X-Admin-Token');
+        if (!adminToken) return respond({ error: 'Admin token diperlukan' }, 401);
+        const admin = await verifyAdminToken(env, adminToken);
+        if (!admin) return respond({ error: 'Bukan admin atau token tidak valid' }, 403);
+        const list = await fetchAdvList(env);
+        return respond({ advNames: list });
+      } catch (err) {
+        return respond({ error: err.message || 'Gagal memuat daftar advertiser' }, 500);
       }
     }
 
