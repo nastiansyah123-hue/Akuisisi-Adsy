@@ -250,7 +250,32 @@ export function createLaporanBridgeHandler() {
     const advToken = request.headers.get('X-Advertiser-Token');
     if (advToken) {
       const adv = await verifyAdvertiserToken(env, advToken);
-      if (!adv) return respond({ error: 'Token advertiser tidak valid atau tidak aktif' }, 401);
+      if (!adv) {
+        // Debug: check which step failed
+        const dbgUrl = (env.AUTOPILOT_SUPABASE_URL || '').replace(/\/$/, '');
+        const dbgKey = env.AUTOPILOT_SUPABASE_SERVICE_KEY;
+        let dbg = 'env_missing';
+        if (dbgUrl && dbgKey) {
+          try {
+            const r = await fetch(`${dbgUrl}/auth/v1/user`, {
+              headers: { apikey: dbgKey, Authorization: `Bearer ${advToken}` },
+              signal: AbortSignal.timeout(5000)
+            });
+            dbg = `auth_step: ${r.status}`;
+            if (r.ok) {
+              const u = await r.json();
+              const q = new URLSearchParams({ id: `eq.${u.id}`, select: 'name,role,status', limit: '1' });
+              const p = await fetch(`${dbgUrl}/rest/v1/profiles?${q}`, {
+                headers: { apikey: dbgKey, Authorization: `Bearer ${dbgKey}` },
+                signal: AbortSignal.timeout(5000)
+              });
+              dbg += ` profile_step: ${p.status}`;
+              if (p.ok) { const d = await p.json(); dbg += ` data: ${JSON.stringify(d)}`; }
+            }
+          } catch (e) { dbg = `error: ${e.message}`; }
+        }
+        return respond({ error: 'Token advertiser tidak valid atau tidak aktif', debug: dbg }, 401);
+      }
 
       try {
         if (request.method === 'GET') {
