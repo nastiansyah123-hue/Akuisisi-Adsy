@@ -55,22 +55,6 @@ async function fetchCSList(env) {
   } catch { return []; }
 }
 
-// Fetch all active advertiser names from Autopilot Supabase (Supabase C)
-async function fetchAdvList(env) {
-  const url = (env.AUTOPILOT_SUPABASE_URL || '').replace(/\/$/, '');
-  const key = env.AUTOPILOT_SUPABASE_SERVICE_KEY;
-  if (!url || !key) return [];
-  try {
-    const q = new URLSearchParams({ status: 'eq.active', role: 'eq.advertiser', select: 'name,email', order: 'name.asc' });
-    const res = await fetch(`${url}/rest/v1/profiles?${q}`, {
-      headers: { apikey: key, Authorization: `Bearer ${key}` },
-      signal: AbortSignal.timeout(8000)
-    });
-    if (!res.ok) return [];
-    return res.json();
-  } catch { return []; }
-}
-
 async function verifyCSToken(env, token) {
   const url = (env.CSORDER_SUPABASE_URL || '').replace(/\/$/, '');
   const key = env.CSORDER_SUPABASE_SERVICE_KEY;
@@ -239,8 +223,10 @@ export function createLaporanBridgeHandler() {
         if (!adminToken) return respond({ error: 'Admin token diperlukan' }, 401);
         const admin = await verifyAdminToken(env, adminToken);
         if (!admin) return respond({ error: 'Bukan admin atau token tidak valid' }, 403);
-        const list = await fetchAdvList(env);
-        return respond({ advNames: list });
+        // Get unique advertiser names from assignments table (Supabase B)
+        const assignments = await db.query('assignments', { select: 'advertiser', order: 'advertiser.asc' });
+        const unique = [...new Set(assignments.map(a => a.advertiser).filter(Boolean))].sort();
+        return respond({ advNames: unique.map(name => ({ name })) });
       } catch (err) {
         return respond({ error: err.message || 'Gagal memuat daftar advertiser' }, 500);
       }
@@ -250,32 +236,7 @@ export function createLaporanBridgeHandler() {
     const advToken = request.headers.get('X-Advertiser-Token');
     if (advToken) {
       const adv = await verifyAdvertiserToken(env, advToken);
-      if (!adv) {
-        // Debug: check which step failed
-        const dbgUrl = (env.AUTOPILOT_SUPABASE_URL || '').replace(/\/$/, '');
-        const dbgKey = env.AUTOPILOT_SUPABASE_SERVICE_KEY;
-        let dbg = 'env_missing';
-        if (dbgUrl && dbgKey) {
-          try {
-            const r = await fetch(`${dbgUrl}/auth/v1/user`, {
-              headers: { apikey: dbgKey, Authorization: `Bearer ${advToken}` },
-              signal: AbortSignal.timeout(5000)
-            });
-            dbg = `auth_step: ${r.status}`;
-            if (r.ok) {
-              const u = await r.json();
-              const q = new URLSearchParams({ id: `eq.${u.id}`, select: 'name,role,status', limit: '1' });
-              const p = await fetch(`${dbgUrl}/rest/v1/profiles?${q}`, {
-                headers: { apikey: dbgKey, Authorization: `Bearer ${dbgKey}` },
-                signal: AbortSignal.timeout(5000)
-              });
-              dbg += ` profile_step: ${p.status}`;
-              if (p.ok) { const d = await p.json(); dbg += ` data: ${JSON.stringify(d)}`; }
-            }
-          } catch (e) { dbg = `error: ${e.message}`; }
-        }
-        return respond({ error: 'Token advertiser tidak valid atau tidak aktif', debug: dbg }, 401);
-      }
+      if (!adv) return respond({ error: 'Token advertiser tidak valid atau tidak aktif' }, 401);
 
       try {
         if (request.method === 'GET') {
