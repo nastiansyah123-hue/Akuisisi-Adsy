@@ -223,9 +223,27 @@ export function createLaporanBridgeHandler() {
         if (!adminToken) return respond({ error: 'Admin token diperlukan' }, 401);
         const admin = await verifyAdminToken(env, adminToken);
         if (!admin) return respond({ error: 'Bukan admin atau token tidak valid' }, 403);
-        // Get unique advertiser names from assignments table (Supabase B)
+        // Get advertiser names from Autopilot Supabase C profiles + assignments Supabase B
+        const autopilotUrl = (env.AUTOPILOT_SUPABASE_URL || '').replace(/\/$/, '');
+        const autopilotKey = env.AUTOPILOT_SUPABASE_SERVICE_KEY;
+        let autopilotNames = [];
+        if (autopilotUrl && autopilotKey) {
+          try {
+            const q = new URLSearchParams({ role: 'in.(advertiser,admin,superadmin)', status: 'eq.active', select: 'name', order: 'name.asc' });
+            const res = await fetch(`${autopilotUrl}/rest/v1/profiles?${q}`, {
+              headers: { apikey: autopilotKey, Authorization: `Bearer ${autopilotKey}` },
+              signal: AbortSignal.timeout(8000)
+            });
+            if (res.ok) {
+              const profiles = await res.json();
+              autopilotNames = profiles.map(p => p.name).filter(Boolean);
+            }
+          } catch {}
+        }
+        // Also get from assignments as fallback
         const assignments = await db.query('assignments', { select: 'advertiser', order: 'advertiser.asc' });
-        const unique = [...new Set(assignments.map(a => a.advertiser).filter(Boolean))].sort();
+        const assignNames = assignments.map(a => a.advertiser).filter(Boolean);
+        const unique = [...new Set([...autopilotNames, ...assignNames])].sort();
         return respond({ advNames: unique.map(name => ({ name })) });
       } catch (err) {
         return respond({ error: err.message || 'Gagal memuat daftar advertiser' }, 500);
