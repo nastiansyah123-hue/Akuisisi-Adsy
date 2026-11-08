@@ -264,7 +264,7 @@ export function createLaporanBridgeHandler() {
             const [assignments, catalog, reports, ads] = await Promise.all([
               db.query('assignments', {
                 advertiser: `eq.${adv.name}`, active: 'eq.true',
-                select: 'id,cs,product,advertiser,channel'
+                select: 'id,cs,product,advertiser,channel,platform'
               }),
               db.query('catalog', { select: 'id,name,unit,packages' }),
               start && end
@@ -325,6 +325,7 @@ export function createLaporanBridgeHandler() {
             if (!ad.date || !ad.product || !ad.channel) {
               return respond({ error: 'Lengkapi tanggal, produk, dan channel.' }, 400);
             }
+            const platform = ad.platform || 'Meta';
             const budget = Number(ad.budget);
             const tax = Number(ad.tax ?? 11);
             if (!Number.isFinite(budget) || budget < 0) {
@@ -336,10 +337,13 @@ export function createLaporanBridgeHandler() {
             if (!['Web', 'CTWA'].includes(ad.channel)) {
               return respond({ error: 'Channel harus Web atau CTWA.' }, 400);
             }
+            if (!['Meta', 'Google', 'TikTok'].includes(platform)) {
+              return respond({ error: 'Platform harus Meta, Google, atau TikTok.' }, 400);
+            }
             // Verify assignment exists
             const assign = await db.query('assignments', {
               product: `eq.${ad.product}`, advertiser: `eq.${adv.name}`,
-              channel: `eq.${ad.channel}`, active: 'eq.true',
+              channel: `eq.${ad.channel}`, platform: `eq.${platform}`, active: 'eq.true',
               select: 'id', limit: '1'
             });
             if (!assign.length) return respond({ error: 'Tidak ada penugasan aktif untuk kombinasi ini.' }, 400);
@@ -350,9 +354,10 @@ export function createLaporanBridgeHandler() {
               product: ad.product,
               advertiser: adv.name,
               channel: ad.channel,
+              platform,
               budget,
               tax
-            }, 'date,product,advertiser,channel');
+            }, 'date,product,advertiser,channel,platform');
 
             return respond({ ok: true });
           }
@@ -383,7 +388,7 @@ export function createLaporanBridgeHandler() {
           const [assignments, catalog, reports] = await Promise.all([
             db.query('assignments', {
               cs: `eq.${cs.nama}`, active: 'eq.true',
-              select: 'id,cs,product,advertiser,channel'
+              select: 'id,cs,product,advertiser,channel,platform'
             }),
             db.query('catalog', { select: 'id,name,unit,packages' }),
             start && end
@@ -406,7 +411,7 @@ export function createLaporanBridgeHandler() {
           // Check if CS has assignments in Laporan Akuisisi
           const assignments = await db.query('assignments', {
             cs: `eq.${cs.nama}`, active: 'eq.true',
-            select: 'id,cs,product,advertiser,channel'
+            select: 'id,cs,product,advertiser,channel,platform'
           });
           return respond({ ok: true, cs: cs.nama, email: cs.email, assignments });
         }
@@ -414,7 +419,7 @@ export function createLaporanBridgeHandler() {
         if (action === 'assignments') {
           const assignments = await db.query('assignments', {
             cs: `eq.${cs.nama}`, active: 'eq.true',
-            select: 'id,cs,product,advertiser,channel'
+            select: 'id,cs,product,advertiser,channel,platform'
           });
           return respond({ assignments });
         }
@@ -499,14 +504,15 @@ export function createLaporanBridgeHandler() {
 
           // Check for existing report
           const existing = await db.query('reports', {
-            id: `eq.${report.id}`, select: 'id,cs,date,product,advertiser,channel', limit: '1'
+            id: `eq.${report.id}`, select: 'id,cs,date,product,advertiser,channel,platform', limit: '1'
           });
 
           if (existing.length) {
             // Update: identity must not change
             const prev = existing[0];
             if (prev.cs !== report.cs || prev.date !== report.date || prev.product !== report.product ||
-                prev.advertiser !== report.advertiser || prev.channel !== report.channel) {
+                prev.advertiser !== report.advertiser || prev.channel !== report.channel ||
+                (prev.platform || 'Meta') !== (report.platform || 'Meta')) {
               return respond({ error: 'Identitas laporan tidak dapat dipindahkan.' }, 400);
             }
             await db.update('reports', report.id, {
@@ -514,11 +520,12 @@ export function createLaporanBridgeHandler() {
               packageLines: report.packageLines
             });
           } else {
-            // Check duplicate date+cs+product+advertiser+channel
+            // Check duplicate date+cs+product+advertiser+channel+platform
             const dup = await db.query('reports', {
               date: `eq.${report.date}`, cs: `eq.${report.cs}`,
               product: `eq.${report.product}`, advertiser: `eq.${report.advertiser}`,
-              channel: `eq.${report.channel}`, select: 'id', limit: '1'
+              channel: `eq.${report.channel}`, platform: `eq.${report.platform || 'Meta'}`,
+              select: 'id', limit: '1'
             });
             if (dup.length) return respond({ error: 'Laporan tanggal dan penugasan ini sudah tersedia.' }, 409);
 
@@ -529,6 +536,7 @@ export function createLaporanBridgeHandler() {
               product: report.product,
               advertiser: report.advertiser,
               channel: report.channel,
+              platform: report.platform || 'Meta',
               leads,
               notes: report.notes || '',
               packageLines: report.packageLines,
