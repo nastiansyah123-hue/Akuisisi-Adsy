@@ -1,5 +1,5 @@
 import React,{useState}from'react';import{Users,Plus,Trash2}from'lucide-react';import ResponsiveTable from'./ResponsiveTable';
-export default function SlTeam({slTeams,allSlTeams,profiles,busy,error,onAdd,onRemove,role}){
+export default function SlTeam({slTeams,allSlTeams,profiles,assignments,busy,error,onAdd,onRemove,role}){
  const isAdmin=role==='admin';
  const slProfiles=(profiles||[]).filter(p=>p.role==='sl'&&p.status==='active').map(p=>p.name).sort();
  const[selectedSL,setSelectedSL]=useState('');
@@ -7,7 +7,8 @@ export default function SlTeam({slTeams,allSlTeams,profiles,busy,error,onAdd,onR
  const teams=isAdmin?(allSlTeams||[]):slTeams;
  const displayTeams=isAdmin&&activeSL?teams.filter(t=>t.sl_name===activeSL):isAdmin?teams:slTeams;
  const allTaken=new Set(teams.map(t=>t.cs_name));
- const available=(profiles||[]).filter(p=>p.role==='cs'&&p.status==='active'&&!allTaken.has(p.name)).map(p=>p.name).sort();
+ const csFromAssignments=[...new Set((assignments||[]).filter(a=>a.active).map(a=>a.cs))].sort();
+ const available=csFromAssignments.filter(name=>!allTaken.has(name));
  const sorted=displayTeams.slice().sort((a,b)=>a.cs_name.localeCompare(b.cs_name));
  const[csName,setCsName]=useState('');
  const addSL=isAdmin?activeSL:null;
