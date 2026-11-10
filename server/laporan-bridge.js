@@ -478,7 +478,7 @@ export function createLaporanBridgeHandler() {
           if (!report || !counts) return respond({ error: 'Data report dan counts diperlukan' }, 400);
 
           // Validate CS ownership
-          if (report.cs !== cs.nama) return respond({ error: 'Hanya CS pemilik laporan yang dapat menyimpan.' }, 403);
+          if (report.cs.toLowerCase() !== cs.nama.toLowerCase()) return respond({ error: 'Hanya CS pemilik laporan yang dapat menyimpan.' }, 403);
 
           // Validate report fields
           if (!report.id || !report.date || !report.product || !report.advertiser || !report.channel) {
