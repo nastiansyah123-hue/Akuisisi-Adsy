@@ -263,25 +263,25 @@ export function createLaporanBridgeHandler() {
             const end = reqUrl.searchParams.get('end');
             const [assignments, catalog, reports, ads] = await Promise.all([
               db.query('assignments', {
-                advertiser: `eq.${adv.name}`, active: 'eq.true',
+                advertiser: `ilike.${adv.name}`, active: 'eq.true',
                 select: 'id,cs,product,advertiser,channel,platform'
               }),
               db.query('catalog', { select: 'id,name,unit,packages' }),
               start && end
                 ? db.query('reports', {
-                    advertiser: `eq.${adv.name}`, select: '*', order: 'date.desc',
+                    advertiser: `ilike.${adv.name}`, select: '*', order: 'date.desc',
                     and: `(date.gte.${start},date.lte.${end})`
                   })
                 : db.query('reports', {
-                    advertiser: `eq.${adv.name}`, select: '*', order: 'date.desc'
+                    advertiser: `ilike.${adv.name}`, select: '*', order: 'date.desc'
                   }),
               start && end
                 ? db.query('ads', {
-                    advertiser: `eq.${adv.name}`, select: '*', order: 'date.desc',
+                    advertiser: `ilike.${adv.name}`, select: '*', order: 'date.desc',
                     and: `(date.gte.${start},date.lte.${end})`
                   })
                 : db.query('ads', {
-                    advertiser: `eq.${adv.name}`, select: '*', order: 'date.desc'
+                    advertiser: `ilike.${adv.name}`, select: '*', order: 'date.desc'
                   })
             ]);
             const reportIds = reports.map(r => r.id);
@@ -294,7 +294,7 @@ export function createLaporanBridgeHandler() {
           if (action === 'adv-reports') {
             const start = reqUrl.searchParams.get('start');
             const end = reqUrl.searchParams.get('end');
-            const params = { advertiser: `eq.${adv.name}`, select: '*', order: 'date.desc' };
+            const params = { advertiser: `ilike.${adv.name}`, select: '*', order: 'date.desc' };
             if (start && end) params.and = `(date.gte.${start},date.lte.${end})`;
             const reports = await db.query('reports', params);
             const reportIds = reports.map(r => r.id);
@@ -307,7 +307,7 @@ export function createLaporanBridgeHandler() {
           if (action === 'adv-ads') {
             const start = reqUrl.searchParams.get('start');
             const end = reqUrl.searchParams.get('end');
-            const params = { advertiser: `eq.${adv.name}`, select: '*', order: 'date.desc' };
+            const params = { advertiser: `ilike.${adv.name}`, select: '*', order: 'date.desc' };
             if (start && end) params.and = `(date.gte.${start},date.lte.${end})`;
             const ads = await db.query('ads', params);
             return respond({ ads });
@@ -342,7 +342,7 @@ export function createLaporanBridgeHandler() {
             }
             // Verify assignment exists
             const assign = await db.query('assignments', {
-              product: `eq.${ad.product}`, advertiser: `eq.${adv.name}`,
+              product: `eq.${ad.product}`, advertiser: `ilike.${adv.name}`,
               channel: `eq.${ad.channel}`, platform: `eq.${platform}`, active: 'eq.true',
               select: 'id', limit: '1'
             });
@@ -387,17 +387,17 @@ export function createLaporanBridgeHandler() {
           const end = reqUrl.searchParams.get('end');
           const [assignments, catalog, reports] = await Promise.all([
             db.query('assignments', {
-              cs: `eq.${cs.nama}`, active: 'eq.true',
+              cs: `ilike.${cs.nama}`, active: 'eq.true',
               select: 'id,cs,product,advertiser,channel,platform'
             }),
             db.query('catalog', { select: 'id,name,unit,packages' }),
             start && end
               ? db.query('reports', {
-                  cs: `eq.${cs.nama}`, select: '*', order: 'date.desc',
+                  cs: `ilike.${cs.nama}`, select: '*', order: 'date.desc',
                   and: `(date.gte.${start},date.lte.${end})`
                 })
               : db.query('reports', {
-                  cs: `eq.${cs.nama}`, select: '*', order: 'date.desc'
+                  cs: `ilike.${cs.nama}`, select: '*', order: 'date.desc'
                 })
           ]);
           const reportIds = reports.map(r => r.id);
@@ -410,7 +410,7 @@ export function createLaporanBridgeHandler() {
         if (action === 'verify') {
           // Check if CS has assignments in Laporan Akuisisi
           const assignments = await db.query('assignments', {
-            cs: `eq.${cs.nama}`, active: 'eq.true',
+            cs: `ilike.${cs.nama}`, active: 'eq.true',
             select: 'id,cs,product,advertiser,channel,platform'
           });
           return respond({ ok: true, cs: cs.nama, email: cs.email, assignments });
@@ -418,7 +418,7 @@ export function createLaporanBridgeHandler() {
 
         if (action === 'assignments') {
           const assignments = await db.query('assignments', {
-            cs: `eq.${cs.nama}`, active: 'eq.true',
+            cs: `ilike.${cs.nama}`, active: 'eq.true',
             select: 'id,cs,product,advertiser,channel,platform'
           });
           return respond({ assignments });
@@ -432,13 +432,13 @@ export function createLaporanBridgeHandler() {
         if (action === 'reports') {
           const start = reqUrl.searchParams.get('start');
           const end = reqUrl.searchParams.get('end');
-          const params = { cs: `eq.${cs.nama}`, select: '*', order: 'date.desc' };
+          const params = { cs: `ilike.${cs.nama}`, select: '*', order: 'date.desc' };
           if (start) params.date = end ? `gte.${start}` : `eq.${start}`;
           // For range filter, use 'and' syntax
           let reports;
           if (start && end) {
             reports = await db.query('reports', {
-              cs: `eq.${cs.nama}`, select: '*', order: 'date.desc',
+              cs: `ilike.${cs.nama}`, select: '*', order: 'date.desc',
               and: `(date.gte.${start},date.lte.${end})`
             });
           } else {
