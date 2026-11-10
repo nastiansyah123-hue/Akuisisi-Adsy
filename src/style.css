@@ -143,3 +143,4 @@ code{font-size:12px}
 .auth-success{font-size:13px}
 .revenue-preview>span{font-size:12px}
 .revenue-preview small{font-size:11px}
+.sl-add-form{display:flex;align-items:flex-end;gap:12px;padding:0 22px 18px}.sl-add-form label{flex:1}.sl-add-form label>select{display:block;width:100%;border:1px solid #cce0ec;background:#fff;border-radius:6px;padding:10px 11px;margin-top:7px;font-size:12px}.sl-add-form .button{margin-bottom:1px}

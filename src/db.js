@@ -1,8 +1,11 @@
 import {readAllRows} from './remoteRows';
 import {createClient} from '@supabase/supabase-js';
 export const supabase=import.meta.env.VITE_SUPABASE_URL&&import.meta.env.VITE_SUPABASE_ANON_KEY?createClient(import.meta.env.VITE_SUPABASE_URL,import.meta.env.VITE_SUPABASE_ANON_KEY):null;
-export async function loadRemote(){const tables=['reports','ads','assignments','catalog','packageCorrections','leadReports','profiles'];const results=await Promise.all(tables.map(t=>readAllRows(supabase,t)));return Object.fromEntries(tables.map((t,i)=>[t,results[i]]));}
+export async function loadRemote(){const tables=['reports','ads','assignments','catalog','packageCorrections','leadReports','profiles','sl_teams'];const results=await Promise.all(tables.map(t=>readAllRows(supabase,t)));const obj=Object.fromEntries(tables.map((t,i)=>[t,results[i]]));obj.slTeams=obj.sl_teams;delete obj.sl_teams;return obj;}
 export async function saveRemote(table,value,existing){const {data,error}=await (existing?supabase.from(table).update(value).eq('id',value.id):supabase.from(table).insert(value)).select().single();if(error)throw error;return data;}
+
+export async function addSlTeamMember(slName,csName){const {data,error}=await supabase.from('sl_teams').insert({sl_name:slName,cs_name:csName}).select().single();if(error)throw error;return data;}
+export async function removeSlTeamMember(id){const {error}=await supabase.from('sl_teams').delete().eq('id',id);if(error)throw error;}
 
 export async function fetchCSNames(){
   if(!supabase)return[];
