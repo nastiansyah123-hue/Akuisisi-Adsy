@@ -6,7 +6,7 @@ import AdvReport from './AdvReport';
 import CSReport from './CSReport';
 import Evaluation from './Evaluation';
 import Pagination from './Pagination';
-import {paginate} from './pagination';
+import {paginate} from './paginateUtils';
 import {LeadReports} from './LeadReports';
 import {leadCategories,emptyLeadCounts,joinLeadReports,saveDailyBundle} from './leads';
 import ResponsiveTable from './ResponsiveTable';

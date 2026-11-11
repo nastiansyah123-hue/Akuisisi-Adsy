@@ -122,8 +122,7 @@ export default function Evaluation({reports,ads,period,hideSpend}){
  const[tab,setTab]=useState('advertiser');
  const[aiText,setAiText]=useState('');
  const[aiLoading,setAiLoading]=useState(false);
- const[aiKey,setAiKey]=useState(()=>localStorage.getItem('adsy-claude-key')||'');
- const[showKeyInput,setShowKeyInput]=useState(false);
+ const aiKey=import.meta.env.VITE_CLAUDE_API_KEY||'';
 
  // Calculate previous period of same length
  const {curGroups,prevGroups}=useMemo(()=>{
@@ -177,8 +176,7 @@ export default function Evaluation({reports,ads,period,hideSpend}){
  const goodCount=analyses.filter(a=>a.overall==='success').length;
 
  async function generateAI(){
-  if(!aiKey){setShowKeyInput(true);return;}
-  localStorage.setItem('adsy-claude-key',aiKey);
+  if(!aiKey){setAiText('Error: VITE_CLAUDE_API_KEY belum diatur di environment variable Vercel.');return;}
   setAiLoading(true);setAiText('');
   try{
    const summary=analyses.map(a=>`${a.name}: omzet ${money(a.cur.revenue)}${a.revDelta!==null?' ('+a.revDelta.toFixed(1)+'%)':''},`+
@@ -213,7 +211,6 @@ export default function Evaluation({reports,ads,period,hideSpend}){
    <button className="button primary" onClick={generateAI} disabled={aiLoading}>
     {aiLoading?<><Loader size={15} className="spin"/>Menganalisis...</>:<><Zap size={15}/>Ringkasan AI</>}
    </button>
-   {showKeyInput&&!aiKey&&<div className="eval-key-input"><input type="password" placeholder="Masukkan Claude API Key..." value={aiKey} onChange={e=>setAiKey(e.target.value)}/><button className="button" onClick={()=>{if(aiKey){localStorage.setItem('adsy-claude-key',aiKey);setShowKeyInput(false);generateAI()}}}>Simpan & Generate</button></div>}
    {aiText&&<div className="eval-ai-result"><div className="eval-ai-label"><Zap size={14}/>Insight AI</div><div className="eval-ai-text">{aiText.split('\n').map((line,i)=><p key={i}>{line}</p>)}</div></div>}
   </div>
 
