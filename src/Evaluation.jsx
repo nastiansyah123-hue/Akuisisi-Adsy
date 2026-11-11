@@ -5,7 +5,7 @@ const num=n=>new Intl.NumberFormat('id-ID').format(n||0);
 const pct=n=>`${(n*100).toFixed(1)}%`;
 const delta=(cur,prev)=>prev?((cur-prev)/prev*100):null;
 
-function analyzeEntity(name,cur,prev,type){
+function analyzeEntity(name,cur,prev,type,teamAvg,leadData,correctionCount){
  const insights=[];
  const cr=cur.leads?cur.closing/cur.leads:0;
  const prevCr=prev.leads?prev.closing/prev.leads:0;
@@ -13,6 +13,8 @@ function analyzeEntity(name,cur,prev,type){
  const prevCaq=prev.revenue?prev.spend/prev.revenue:0;
  const cac=cur.closing?cur.spend/cur.closing:0;
  const prevCac=prev.closing?prev.spend/prev.closing:0;
+ const cpl=cur.leads?cur.spend/cur.leads:0;
+ const roas=cur.spend?cur.revenue/cur.spend:0;
  const revDelta=delta(cur.revenue,prev.revenue);
  const leadsDelta=delta(cur.leads,prev.leads);
  const spendDelta=delta(cur.spend,prev.spend);
@@ -21,11 +23,12 @@ function analyzeEntity(name,cur,prev,type){
  const cacDelta=prevCac?(cac-prevCac)/prevCac*100:null;
  const hasPrev=prev.leads>0||prev.revenue>0;
 
+ // === Tren (vs periode sebelumnya) ===
  if(hasPrev){
   if(revDelta!==null){
    if(revDelta<=-20)insights.push({level:'danger',text:`Omzet turun drastis ${revDelta.toFixed(1)}% (${money(prev.revenue)} → ${money(cur.revenue)})`});
    else if(revDelta<=-5)insights.push({level:'warning',text:`Omzet turun ${revDelta.toFixed(1)}% (${money(prev.revenue)} → ${money(cur.revenue)})`});
-   else if(revDelta>=20)insights.push({level:'success',text:`Omzet naik signifikan +${revDelta.toFixed(1)}% (${money(cur.revenue)})`});
+   else if(revDelta>=20)insights.push({level:'success',text:`Omzet naik signifikan +${revDelta.toFixed(1)}% → ${money(cur.revenue)}`});
    else if(revDelta>=5)insights.push({level:'success',text:`Omzet naik +${revDelta.toFixed(1)}%`});
   }
   if(crDelta!==null){
@@ -34,42 +37,36 @@ function analyzeEntity(name,cur,prev,type){
    else if(crDelta>=10)insights.push({level:'success',text:`Closing rate membaik (${pct(prevCr)} → ${pct(cr)})`});
   }
   if(cur.spend>0&&prev.spend>0){
-   if(caqDelta!==null){
-    if(caqDelta>=20)insights.push({level:'danger',text:`CAQ naik signifikan (${pct(prevCaq)} → ${pct(caq)})`});
-    else if(caqDelta>=5)insights.push({level:'warning',text:`CAQ naik (${pct(prevCaq)} → ${pct(caq)})`});
-    else if(caqDelta<=-10)insights.push({level:'success',text:`CAQ membaik (${pct(prevCaq)} → ${pct(caq)})`});
-   }
-   if(cacDelta!==null){
-    if(cacDelta>=20)insights.push({level:'danger',text:`CAC naik (${money(prevCac)} → ${money(cac)})`});
-    else if(cacDelta<=-10)insights.push({level:'success',text:`CAC turun (${money(prevCac)} → ${money(cac)})`});
-   }
-   if(spendDelta>10&&revDelta!==null&&revDelta<5){
+   if(caqDelta!==null&&caqDelta>=20)insights.push({level:'danger',text:`CAQ naik signifikan (${pct(prevCaq)} → ${pct(caq)})`});
+   else if(caqDelta!==null&&caqDelta>=5)insights.push({level:'warning',text:`CAQ naik (${pct(prevCaq)} → ${pct(caq)})`});
+   else if(caqDelta!==null&&caqDelta<=-10)insights.push({level:'success',text:`CAQ membaik (${pct(prevCaq)} → ${pct(caq)})`});
+   if(cacDelta!==null&&cacDelta>=20)insights.push({level:'danger',text:`CAC naik (${money(prevCac)} → ${money(cac)})`});
+   else if(cacDelta!==null&&cacDelta<=-10)insights.push({level:'success',text:`CAC turun (${money(prevCac)} → ${money(cac)})`});
+   if(spendDelta>10&&revDelta!==null&&revDelta<5)
     insights.push({level:'danger',text:`Biaya iklan naik +${spendDelta.toFixed(1)}% tapi omzet ${revDelta>0?'hanya naik '+revDelta.toFixed(1)+'%':'turun '+Math.abs(revDelta).toFixed(1)+'%'}`});
-   }
   }
   if(leadsDelta!==null){
    if(leadsDelta<=-20)insights.push({level:'danger',text:`Leads turun drastis ${leadsDelta.toFixed(1)}%`});
    else if(leadsDelta<=-5)insights.push({level:'warning',text:`Leads menurun ${leadsDelta.toFixed(1)}%`});
    else if(leadsDelta>=20)insights.push({level:'success',text:`Leads naik +${leadsDelta.toFixed(1)}%`});
   }
-  if(type==='cs'){
-   const upsell=cur.closing?cur.units/cur.closing:0;
-   const prevUpsell=prev.closing?prev.units/prev.closing:0;
-   if(prevUpsell>0&&upsell>0){
-    const upDelta=(upsell-prevUpsell)/prevUpsell*100;
-    if(upDelta<=-10)insights.push({level:'warning',text:`Upsell turun (${prevUpsell.toFixed(2)}× → ${upsell.toFixed(2)}×)`});
-    else if(upDelta>=10)insights.push({level:'success',text:`Upsell naik (${prevUpsell.toFixed(2)}× → ${upsell.toFixed(2)}×)`});
-   }
-  }
  }
 
- // Absolute thresholds (always apply)
+ // === Threshold absolut ===
+ // CR
  if(cur.leads>0){
   if(cr<0.15)insights.push({level:'danger',text:`CR rendah: ${pct(cr)} — dari ${num(cur.leads)} leads hanya ${num(cur.closing)} closing`});
   else if(cr<0.25)insights.push({level:'warning',text:`CR cukup rendah: ${pct(cr)}`});
   else if(cr>=0.5)insights.push({level:'success',text:`CR tinggi: ${pct(cr)}`});
   else if(cr>=0.35)insights.push({level:'success',text:`CR bagus: ${pct(cr)}`});
  }
+ // Benchmark vs rata-rata tim
+ if(cur.leads>0&&teamAvg.cr>0){
+  const diff=(cr-teamAvg.cr)/teamAvg.cr*100;
+  if(diff<=-30)insights.push({level:'danger',text:`CR jauh di bawah rata-rata tim (${pct(cr)} vs avg ${pct(teamAvg.cr)})`});
+  else if(diff>=30)insights.push({level:'success',text:`CR di atas rata-rata tim (${pct(cr)} vs avg ${pct(teamAvg.cr)})`});
+ }
+ // CAQ, CAC, CPL, ROAS (advertiser only)
  if(cur.spend>0&&cur.revenue>0){
   if(caq>0.5)insights.push({level:'danger',text:`CAQ tinggi: ${pct(caq)} — separuh omzet habis untuk iklan`});
   else if(caq>0.35)insights.push({level:'warning',text:`CAQ cukup tinggi: ${pct(caq)}`});
@@ -80,11 +77,47 @@ function analyzeEntity(name,cur,prev,type){
   else if(cac>120000)insights.push({level:'warning',text:`CAC cukup tinggi: ${money(cac)}`});
   else if(cac<50000)insights.push({level:'success',text:`CAC murah: ${money(cac)}`});
  }
+ if(cur.spend>0&&cur.leads>0){
+  if(cpl>50000)insights.push({level:'danger',text:`CPL mahal: ${money(cpl)} per lead`});
+  else if(cpl>30000)insights.push({level:'warning',text:`CPL cukup tinggi: ${money(cpl)}`});
+  else if(cpl<15000)insights.push({level:'success',text:`CPL murah: ${money(cpl)}`});
+ }
+ if(cur.spend>0){
+  if(roas<2)insights.push({level:'danger',text:`ROAS rendah: ${roas.toFixed(1)}× — iklan belum balik modal`});
+  else if(roas<3)insights.push({level:'warning',text:`ROAS cukup: ${roas.toFixed(1)}×`});
+  else if(roas>=5)insights.push({level:'success',text:`ROAS tinggi: ${roas.toFixed(1)}×`});
+ }
+ // Anomali
+ if(cur.spend>0&&cur.closing===0&&cur.leads>0)insights.push({level:'danger',text:`Spend ${money(cur.spend)} tapi 0 closing — iklan tidak menghasilkan konversi`});
+ if(cur.leads>5&&cur.closing===0)insights.push({level:'danger',text:`${num(cur.leads)} leads tapi 0 closing — leads tidak terkonversi`});
  if(cur.leads===0&&cur.closing===0)insights.push({level:'warning',text:'Tidak ada aktivitas di periode ini'});
- if(type==='cs'&&cur.closing>0){
-  const upsell=cur.units/cur.closing;
-  if(upsell>=2)insights.push({level:'success',text:`Upsell tinggi: ${upsell.toFixed(2)}×`});
-  else if(upsell<1.1)insights.push({level:'warning',text:`Upsell rendah: ${upsell.toFixed(2)}×`});
+
+ // === CS-specific ===
+ if(type==='cs'){
+  const upsell=cur.closing?cur.units/cur.closing:0;
+  if(cur.closing>0){
+   if(upsell>=2)insights.push({level:'success',text:`Upsell tinggi: ${upsell.toFixed(2)}×`});
+   else if(upsell<1.1)insights.push({level:'warning',text:`Upsell rendah: ${upsell.toFixed(2)}× — hampir tidak ada tambahan unit`});
+  }
+  // Tren upsell
+  if(hasPrev){
+   const prevUpsell=prev.closing?prev.units/prev.closing:0;
+   if(prevUpsell>0&&upsell>0){
+    const upDelta=(upsell-prevUpsell)/prevUpsell*100;
+    if(upDelta<=-10)insights.push({level:'warning',text:`Upsell turun (${prevUpsell.toFixed(2)}× → ${upsell.toFixed(2)}×)`});
+    else if(upDelta>=10)insights.push({level:'success',text:`Upsell naik (${prevUpsell.toFixed(2)}× → ${upsell.toFixed(2)}×)`});
+   }
+  }
+  // Lead quality (from leadReports)
+  if(leadData&&leadData.total>0){
+   const p=k=>(leadData[k]||0)/leadData.total;
+   if(p('passive')>0.4)insights.push({level:'danger',text:`${pct(p('passive'))} lead pasif — banyak lead tidak ditindaklanjuti`});
+   if(p('ooc')>0.25)insights.push({level:'warning',text:`${pct(p('ooc'))} lead OOC — banyak yang belum punya budget`});
+   if(p('consultation')>0.3&&cr<0.25)insights.push({level:'warning',text:`${pct(p('consultation'))} konsultasi tapi CR ${pct(cr)} — lead tertarik tapi gagal closing`});
+   if(p('boughtElsewhere')>0.1)insights.push({level:'warning',text:`${pct(p('boughtElsewhere'))} beli di tempat lain — kompetitor menang`});
+  }
+  // Koreksi
+  if(correctionCount>3)insights.push({level:'warning',text:`${correctionCount} koreksi data — sering salah input`});
  }
 
  if(!insights.length)insights.push({level:'neutral',text:'Performa stabil.'});
@@ -92,7 +125,7 @@ function analyzeEntity(name,cur,prev,type){
  const score=insights.reduce((s,i)=>s+(i.level==='danger'?-2:i.level==='warning'?-1:i.level==='success'?1:0),0);
  const overall=score<=-2?'danger':score<0?'warning':score>=1?'success':'neutral';
 
- return {name,cur,prev,insights,overall,cr,caq,cac,revDelta,leadsDelta};
+ return {name,cur,prev,insights,overall,cr,caq,cac,cpl,roas,revDelta,leadsDelta,hasPrev};
 }
 
 function aggregate(groups,byKey){
@@ -141,7 +174,7 @@ function Card({analysis,type,hideSpend,aiSummary}){
      <span>Leads <b>{num(a.cur.leads)}</b></span>
      <span>Closing <b>{num(a.cur.closing)}</b></span>
      <span>CR <b>{pct(a.cr)}</b></span>
-     {!hideSpend&&a.cur.spend>0&&<><span>CAC <b>{money(a.cac)}</b></span><span>CAQ <b>{pct(a.caq)}</b></span></>}
+     {!hideSpend&&a.cur.spend>0&&<><span>CAC <b>{money(a.cac)}</b></span><span>CAQ <b>{pct(a.caq)}</b></span><span>CPL <b>{money(a.cpl)}</b></span><span>ROAS <b>{a.roas.toFixed(1)}×</b></span></>}
      {type==='cs'&&a.cur.closing>0&&<span>Upsell <b>{(a.cur.units/a.cur.closing).toFixed(2)}×</b></span>}
     </div>
    </div>
@@ -156,7 +189,7 @@ function Card({analysis,type,hideSpend,aiSummary}){
  </div>;
 }
 
-export default function Evaluation({reports,ads,period,hideSpend}){
+export default function Evaluation({reports,ads,leadReports,corrections,period,hideSpend}){
  const[tab,setTab]=useState('advertiser');
  const[aiTexts,setAiTexts]=useState({});
  const[aiLoading,setAiLoading]=useState(false);
@@ -192,6 +225,52 @@ export default function Evaluation({reports,ads,period,hideSpend}){
   return {curGroups:summarizeLocal(curR,curA),prevGroups:summarizeLocal(prevR,prevA)};
  },[reports,ads,period]);
 
+ // Lead quality per CS
+ const csLeadData=useMemo(()=>{
+  if(!leadReports||!leadReports.length)return {};
+  const {start,end}=period;
+  const reportMap=new Map(reports.filter(r=>r.date>=start&&r.date<=end).map(r=>[r.id,r]));
+  const map={};
+  for(const lr of leadReports){
+   const r=reportMap.get(lr.reportId);
+   if(!r)continue;
+   if(!map[r.cs])map[r.cs]={total:0,passive:0,consultation:0,priceShipping:0,ooc:0,casual:0,boughtElsewhere:0,other:0};
+   const c=lr.counts||{};
+   for(const k of Object.keys(map[r.cs])){
+    if(k==='total')continue;
+    map[r.cs][k]+=Number(c[k]||0);
+    map[r.cs].total+=Number(c[k]||0);
+   }
+  }
+  return map;
+ },[leadReports,reports,period]);
+
+ // Correction count per CS
+ const csCorrectionCount=useMemo(()=>{
+  if(!corrections||!corrections.length)return {};
+  const {start,end}=period;
+  const reportIds=new Set(reports.filter(r=>r.date>=start&&r.date<=end).map(r=>r.id));
+  const reportCS=new Map(reports.map(r=>[r.id,r.cs]));
+  const map={};
+  for(const c of corrections){
+   if(!reportIds.has(c.reportId))continue;
+   const cs=reportCS.get(c.reportId);
+   if(cs)map[cs]=(map[cs]||0)+1;
+  }
+  return map;
+ },[corrections,reports,period]);
+
+ // Team average for benchmark
+ const teamAvg=useMemo(()=>{
+  const key=tab==='advertiser'?'advertiser':'cs';
+  const curMap=aggregate(curGroups,key);
+  const vals=Object.values(curMap);
+  if(!vals.length)return {cr:0};
+  const totalLeads=vals.reduce((s,v)=>s+v.leads,0);
+  const totalClosing=vals.reduce((s,v)=>s+v.closing,0);
+  return {cr:totalLeads?totalClosing/totalLeads:0};
+ },[curGroups,tab]);
+
  const analyses=useMemo(()=>{
   const key=tab==='advertiser'?'advertiser':'cs';
   const curMap=aggregate(curGroups,key);
@@ -199,36 +278,38 @@ export default function Evaluation({reports,ads,period,hideSpend}){
   const allNames=[...new Set([...Object.keys(curMap),...Object.keys(prevMap)])];
   const zero={leads:0,closing:0,units:0,revenue:0,spend:0};
   return allNames
-   .map(n=>analyzeEntity(n,curMap[n]||zero,prevMap[n]||zero,key))
+   .map(n=>analyzeEntity(n,curMap[n]||zero,prevMap[n]||zero,key,teamAvg,
+    key==='cs'?csLeadData[n]:null,
+    key==='cs'?(csCorrectionCount[n]||0):0))
    .sort((a,b)=>{
     const order={danger:0,warning:1,neutral:2,success:3};
     return (order[a.overall]-order[b.overall])||b.cur.revenue-a.cur.revenue;
    });
- },[curGroups,prevGroups,tab]);
+ },[curGroups,prevGroups,tab,teamAvg,csLeadData,csCorrectionCount]);
 
  const dangerCount=analyses.filter(a=>a.overall==='danger').length;
  const warnCount=analyses.filter(a=>a.overall==='warning').length;
  const goodCount=analyses.filter(a=>a.overall==='success').length;
 
  async function generateAll(){
-  if(!aiKey){return;}
-  if(!analyses.length)return;
+  if(!aiKey||!analyses.length)return;
   setAiLoading(true);
   try{
    const dataBlock=analyses.map(a=>{
     let line=`[${a.name}] Omzet: ${money(a.cur.revenue)}`;
     if(a.revDelta!==null)line+=` (${a.revDelta>0?'+':''}${a.revDelta.toFixed(1)}% vs sebelumnya)`;
     line+=`, Leads: ${num(a.cur.leads)}, Closing: ${num(a.cur.closing)}, CR: ${pct(a.cr)}`;
-    if(a.cur.spend>0)line+=`, CAC: ${money(a.cac)}, CAQ: ${pct(a.caq)}`;
-    line+=` → ${a.insights.map(i=>i.text).join('; ')}`;
+    if(a.cur.spend>0)line+=`, CAC: ${money(a.cac)}, CAQ: ${pct(a.caq)}, CPL: ${money(a.cpl)}, ROAS: ${a.roas.toFixed(1)}×`;
+    if(a.cur.closing>0&&tab==='cs')line+=`, Upsell: ${(a.cur.units/a.cur.closing).toFixed(2)}×`;
+    line+=` | Status: ${a.overall} | ${a.insights.map(i=>i.text).join('; ')}`;
     return line;
    }).join('\n');
 
    const names=analyses.map(a=>a.name);
-   const prompt=`Kamu analis performa akuisisi digital marketing. Data ${tab==='advertiser'?'per advertiser':'per CS'} periode ini:\n\n${dataBlock}\n\n`+
+   const prompt=`Kamu analis performa akuisisi digital marketing. Data ${tab==='advertiser'?'per advertiser':'per CS'} periode ini (rata-rata CR tim: ${pct(teamAvg.cr)}):\n\n${dataBlock}\n\n`+
     `Berikan evaluasi untuk SETIAP ${tab==='advertiser'?'advertiser':'CS'} dengan format:\n\n`+
-    names.map(n=>`[${n}]\n(tulis 2-3 kalimat evaluasi singkat + 1 rekomendasi aksi konkret)`).join('\n\n')+
-    `\n\nAturan:\n- Pakai format [Nama] diikuti evaluasi\n- Bahasa Indonesia, to the point\n- Jangan pakai heading (#) atau bullet (-), tulis paragraf singkat saja\n- Sebutkan angka penting tapi jangan ulangi semua`;
+    names.map(n=>`[${n}]\n(tulis 2-3 kalimat evaluasi + 1 rekomendasi aksi)`).join('\n\n')+
+    `\n\nAturan:\n- Format: [Nama] diikuti paragraf evaluasi\n- Bahasa Indonesia, to the point, tidak bertele-tele\n- Jangan pakai heading (#), bullet (-), atau numbering\n- Sebutkan angka penting, bandingkan dengan rata-rata tim\n- Rekomendasi harus spesifik dan actionable`;
 
    const res=await fetch('https://api.anthropic.com/v1/messages',{
     method:'POST',
@@ -238,15 +319,12 @@ export default function Evaluation({reports,ads,period,hideSpend}){
    if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.error?.message||`HTTP ${res.status}`);}
    const data=await res.json();
    const text=data.content?.[0]?.text||'';
-
-   // Parse response: split by [Name] markers
    const result={};
    for(let i=0;i<names.length;i++){
     const marker=`[${names[i]}]`;
     const idx=text.indexOf(marker);
     if(idx===-1)continue;
     const start=idx+marker.length;
-    // find next marker or end
     let end=text.length;
     for(let j=i+1;j<names.length;j++){
      const nextIdx=text.indexOf(`[${names[j]}]`,start);
