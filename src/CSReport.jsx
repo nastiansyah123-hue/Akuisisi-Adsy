@@ -1,0 +1,54 @@
+import React,{useState}from'react';import{ChevronDown,ChevronRight,Inbox}from'lucide-react';import ResponsiveTable from'./ResponsiveTable';
+const money=n=>new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n||0);
+const num=n=>new Intl.NumberFormat('id-ID').format(n||0);
+const pct=n=>`${(n*100).toFixed(1)}%`;
+export default function CSReport({groups,hideSpend}){
+ const[expanded,setExpanded]=useState(new Set());
+ const byCS={};
+ for(const g of groups){
+  for(const cs of g.cs){
+   if(!byCS[cs])byCS[cs]={cs,leads:0,closing:0,units:0,revenue:0,spend:0,products:{}};
+   const a=byCS[cs];
+   a.leads+=g.leads;a.closing+=g.closing;a.units+=g.units;a.revenue+=g.revenue;a.spend+=g.spend;
+   const pk=g.product;
+   if(!a.products[pk])a.products[pk]={product:g.product,leads:0,closing:0,units:0,revenue:0,spend:0};
+   const p=a.products[pk];
+   p.leads+=g.leads;p.closing+=g.closing;p.units+=g.units;p.revenue+=g.revenue;p.spend+=g.spend;
+  }
+ }
+ const rows=Object.values(byCS).sort((a,b)=>b.revenue-a.revenue);
+ function toggle(name){setExpanded(prev=>{const next=new Set(prev);if(next.has(name))next.delete(name);else next.add(name);return next})}
+ if(!rows.length)return <div className="empty"><Inbox size={30}/><strong>Belum ada data CS</strong><p>Ubah filter atau tunggu laporan masuk.</p></div>;
+ return <>{rows.map((r,i)=>{
+  const isOpen=expanded.has(r.cs);
+  const prods=Object.values(r.products).sort((a,b)=>b.revenue-a.revenue);
+  const upsell=r.closing>0?(r.units/r.closing):0;
+  return <section key={r.cs} className="card adv-card" style={{marginBottom:12}}>
+   <div className="adv-card-header" onClick={()=>toggle(r.cs)}>
+    <span className="adv-rank">{i+1}</span>
+    <span className="person"><span className="person-avatar">{r.cs.slice(0,2).toUpperCase()}</span><div><strong>{r.cs}</strong><small className="cell-sub">{prods.length} produk</small></div></span>
+    <div className="adv-card-metrics">
+     <div><small>Leads</small><strong>{num(r.leads)}</strong></div>
+     <div><small>Closing</small><strong>{num(r.closing)}</strong></div>
+     <div><small>CR</small><strong><span className="rate">{pct(r.leads?r.closing/r.leads:0)}</span></strong></div>
+     <div><small>Unit</small><strong>{num(r.units)}</strong></div>
+     <div><small>Omzet</small><strong className="money">{money(r.revenue)}</strong></div>
+     <div><small>Upsell</small><strong>{upsell?upsell.toFixed(2)+'×':'—'}</strong></div>
+    </div>
+    {isOpen?<ChevronDown size={16}/>:<ChevronRight size={16}/>}
+   </div>
+   {isOpen&&<div className="adv-card-detail">
+    <div className="table-wrap"><ResponsiveTable><thead><tr><th>Produk</th><th>Leads</th><th>Closing</th><th>CR</th><th>Unit</th><th>Omzet</th><th>Upsell</th></tr></thead><tbody>{prods.map(d=>{
+     const u=d.closing>0?(d.units/d.closing):0;
+     return <tr key={d.product}>
+      <td><strong>{d.product}</strong></td>
+      <td>{num(d.leads)}</td>
+      <td>{num(d.closing)}</td>
+      <td><span className="rate">{pct(d.leads?d.closing/d.leads:0)}</span></td>
+      <td>{num(d.units)}</td>
+      <td className="money">{money(d.revenue)}</td>
+      <td>{u?u.toFixed(2)+'×':'—'}</td>
+     </tr>})}</tbody></ResponsiveTable></div>
+   </div>}
+  </section>})}</>;
+}
