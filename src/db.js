@@ -40,5 +40,8 @@ export async function fetchAdvNames(){
   }catch{return[];}
 }
 
+export async function deleteReport(reportId){const {error}=await supabase.rpc('delete_report',{p_report_id:reportId});if(error)throw error;return loadRemote();}
+export async function deleteAd(adId){const {error}=await supabase.rpc('delete_ad',{p_ad_id:adId});if(error)throw error;return loadRemote();}
+
 export async function correctRemote({reportId,packageId,delta,reason,expected}){const {error}=await supabase.rpc('correct_package',{p_report_id:reportId,p_package_id:packageId,p_delta:delta,p_reason:reason,p_expected:expected});if(error)throw error;return loadRemote();}
 export async function saveDailyRemote(report,counts,notes){const {error}=await supabase.rpc('save_cs_daily_report',{p_report:report,p_counts:counts,p_notes:notes});if(error)throw error;return loadRemote();}
