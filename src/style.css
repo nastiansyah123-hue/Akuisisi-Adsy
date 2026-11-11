@@ -144,3 +144,4 @@ code{font-size:12px}
 .revenue-preview>span{font-size:12px}
 .revenue-preview small{font-size:11px}
 .sl-add-form{display:flex;align-items:flex-end;gap:12px;padding:0 22px 18px}.sl-add-form label{flex:1}.sl-add-form label>select{display:block;width:100%;border:1px solid #cce0ec;background:#fff;border-radius:6px;padding:10px 11px;margin-top:7px;font-size:12px}.sl-add-form .button{margin-bottom:1px}
+.adv-row{cursor:pointer}.adv-row:hover{background:#eef6fb!important}.adv-row td{font-weight:500}.adv-detail-row td{background:#f4f9fc;font-size:10px;padding-top:10px;padding-bottom:10px;color:#587488;border-bottom:1px solid #eaf4fa}.adv-detail-row:last-child td{border-bottom:1px solid #e0ecf3}.adv-detail-row .money{color:#587488}.adv-detail-row .rate{font-size:9px}
