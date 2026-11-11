@@ -171,6 +171,18 @@ function laporanClient(env) {
         throw new Error(`DB update ${table}: ${res.status} ${err}`);
       }
       return res.json();
+    },
+    async del(table, filters = {}) {
+      const q = new URLSearchParams(filters);
+      const res = await fetch(`${url}/rest/v1/${table}?${q}`, {
+        method: 'DELETE',
+        headers: { apikey: key, Authorization: `Bearer ${key}` },
+        signal: AbortSignal.timeout(8000)
+      });
+      if (!res.ok) {
+        const err = await res.text().catch(() => '');
+        throw new Error(`DB delete ${table}: ${res.status} ${err}`);
+      }
     }
   };
 }
@@ -359,6 +371,19 @@ export function createLaporanBridgeHandler() {
               tax
             }, 'date,product,advertiser,channel,platform');
 
+            return respond({ ok: true });
+          }
+
+          if (action === 'delete-ad') {
+            const { adId } = body;
+            if (!adId) return respond({ error: 'ID iklan diperlukan' }, 400);
+            // Verify ownership
+            const existing = await db.query('ads', { id: `eq.${adId}`, select: 'id,advertiser', limit: '1' });
+            if (!existing.length) return respond({ error: 'Data iklan tidak ditemukan.' }, 404);
+            if (existing[0].advertiser.toLowerCase() !== adv.name.toLowerCase()) {
+              return respond({ error: 'Hanya advertiser pemilik yang dapat menghapus.' }, 403);
+            }
+            await db.del('ads', { id: `eq.${adId}` });
             return respond({ ok: true });
           }
 
@@ -554,6 +579,22 @@ export function createLaporanBridgeHandler() {
             notes: notes || ''
           }, 'reportId');
 
+          return respond({ ok: true });
+        }
+
+        if (action === 'delete-report') {
+          const { reportId } = body;
+          if (!reportId) return respond({ error: 'ID laporan diperlukan' }, 400);
+          // Verify ownership
+          const existing = await db.query('reports', { id: `eq.${reportId}`, select: 'id,cs', limit: '1' });
+          if (!existing.length) return respond({ error: 'Laporan tidak ditemukan.' }, 404);
+          if (existing[0].cs.toLowerCase() !== cs.nama.toLowerCase()) {
+            return respond({ error: 'Hanya CS pemilik laporan yang dapat menghapus.' }, 403);
+          }
+          // Delete related data first, then report
+          await db.del('packageCorrections', { reportId: `eq.${reportId}` });
+          await db.del('leadReports', { reportId: `eq.${reportId}` });
+          await db.del('reports', { id: `eq.${reportId}` });
           return respond({ ok: true });
         }
 
