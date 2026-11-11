@@ -1,7 +1,7 @@
 import {readAllRows} from './remoteRows';
 import {createClient} from '@supabase/supabase-js';
 export const supabase=import.meta.env.VITE_SUPABASE_URL&&import.meta.env.VITE_SUPABASE_ANON_KEY?createClient(import.meta.env.VITE_SUPABASE_URL,import.meta.env.VITE_SUPABASE_ANON_KEY):null;
-export async function loadRemote(){const tables=['reports','ads','assignments','catalog','packageCorrections','leadReports','profiles','sl_teams'];const results=await Promise.all(tables.map(t=>readAllRows(supabase,t)));const obj=Object.fromEntries(tables.map((t,i)=>[t,results[i]]));obj.slTeams=obj.sl_teams;delete obj.sl_teams;return obj;}
+export async function loadRemote(){const tables=['reports','ads','assignments','catalog','packageCorrections','leadReports','profiles','sl_teams','kpi_targets'];const results=await Promise.all(tables.map(t=>readAllRows(supabase,t)));const obj=Object.fromEntries(tables.map((t,i)=>[t,results[i]]));obj.slTeams=obj.sl_teams;delete obj.sl_teams;obj.kpiTargets=obj.kpi_targets;delete obj.kpi_targets;return obj;}
 export async function saveRemote(table,value,existing){const {data,error}=await (existing?supabase.from(table).update(value).eq('id',value.id):supabase.from(table).insert(value)).select().single();if(error)throw error;return data;}
 
 export async function changeAccountRole(userId,role){const {error}=await supabase.rpc('change_account_role',{p_user_id:userId,p_role:role});if(error)throw error;}

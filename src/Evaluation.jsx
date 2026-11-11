@@ -1,11 +1,32 @@
 import React,{useState,useMemo}from'react';
-import{AlertTriangle,CheckCircle2,Zap,Loader,ChevronDown,ChevronUp}from'lucide-react';
+import{AlertTriangle,CheckCircle2,Zap,Loader,ChevronDown,ChevronUp,Settings,Save}from'lucide-react';
 const money=n=>new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n||0);
 const num=n=>new Intl.NumberFormat('id-ID').format(n||0);
 const pct=n=>`${(n*100).toFixed(1)}%`;
 const delta=(cur,prev)=>prev?((cur-prev)/prev*100):null;
+const DEFAULT_KPI={max_caq:0.35,max_cac:150000,max_cpl:30000,min_cr:0.25,min_cr_cs:0.30,min_upsell:1.50};
 
-function analyzeEntity(name,cur,prev,type,teamAvg,leadData,correctionCount){
+function getKpi(kpiTargets,product){
+ const found=kpiTargets.find(k=>k.product===product);
+ return found||{...DEFAULT_KPI,product};
+}
+
+// Weighted average KPI for entity that spans multiple products
+function weightedKpi(kpiTargets,productRevenues,type){
+ const total=Object.values(productRevenues).reduce((s,v)=>s+v,0);
+ if(!total)return DEFAULT_KPI;
+ const fields=type==='cs'?['min_cr_cs','min_upsell']:['max_caq','max_cac','max_cpl','min_cr'];
+ const result={...DEFAULT_KPI};
+ for(const f of fields){
+  result[f]=Object.entries(productRevenues).reduce((s,[prod,rev])=>{
+   const k=getKpi(kpiTargets,prod);
+   return s+(Number(k[f])||Number(DEFAULT_KPI[f]))*rev/total;
+  },0);
+ }
+ return result;
+}
+
+function analyzeEntity(name,cur,prev,type,teamAvg,kpi,leadData,correctionCount){
  const insights=[];
  const cr=cur.leads?cur.closing/cur.leads:0;
  const prevCr=prev.leads?prev.closing/prev.leads:0;
@@ -23,6 +44,9 @@ function analyzeEntity(name,cur,prev,type,teamAvg,leadData,correctionCount){
  const cacDelta=prevCac?(cac-prevCac)/prevCac*100:null;
  const hasPrev=prev.leads>0||prev.revenue>0;
 
+ // KPI thresholds
+ const targetCr=type==='cs'?kpi.min_cr_cs:kpi.min_cr;
+
  // === Tren (vs periode sebelumnya) ===
  if(hasPrev){
   if(revDelta!==null){
@@ -32,9 +56,9 @@ function analyzeEntity(name,cur,prev,type,teamAvg,leadData,correctionCount){
    else if(revDelta>=5)insights.push({level:'success',text:`Omzet naik +${revDelta.toFixed(1)}%`});
   }
   if(crDelta!==null){
-   if(crDelta<=-15)insights.push({level:'danger',text:`Closing rate turun tajam (${pct(prevCr)} → ${pct(cr)})`});
-   else if(crDelta<=-5)insights.push({level:'warning',text:`Closing rate menurun (${pct(prevCr)} → ${pct(cr)})`});
-   else if(crDelta>=10)insights.push({level:'success',text:`Closing rate membaik (${pct(prevCr)} → ${pct(cr)})`});
+   if(crDelta<=-15)insights.push({level:'danger',text:`CR turun tajam (${pct(prevCr)} → ${pct(cr)})`});
+   else if(crDelta<=-5)insights.push({level:'warning',text:`CR menurun (${pct(prevCr)} → ${pct(cr)})`});
+   else if(crDelta>=10)insights.push({level:'success',text:`CR membaik (${pct(prevCr)} → ${pct(cr)})`});
   }
   if(cur.spend>0&&prev.spend>0){
    if(caqDelta!==null&&caqDelta>=20)insights.push({level:'danger',text:`CAQ naik signifikan (${pct(prevCaq)} → ${pct(caq)})`});
@@ -52,13 +76,13 @@ function analyzeEntity(name,cur,prev,type,teamAvg,leadData,correctionCount){
   }
  }
 
- // === Threshold absolut ===
- // CR
+ // === KPI-based thresholds ===
+ // CR vs target
  if(cur.leads>0){
-  if(cr<0.15)insights.push({level:'danger',text:`CR rendah: ${pct(cr)} — dari ${num(cur.leads)} leads hanya ${num(cur.closing)} closing`});
-  else if(cr<0.25)insights.push({level:'warning',text:`CR cukup rendah: ${pct(cr)}`});
-  else if(cr>=0.5)insights.push({level:'success',text:`CR tinggi: ${pct(cr)}`});
-  else if(cr>=0.35)insights.push({level:'success',text:`CR bagus: ${pct(cr)}`});
+  if(cr<targetCr*0.6)insights.push({level:'danger',text:`CR ${pct(cr)} jauh di bawah target ${pct(targetCr)}`});
+  else if(cr<targetCr)insights.push({level:'warning',text:`CR ${pct(cr)} di bawah target ${pct(targetCr)}`});
+  else if(cr>=targetCr*1.3)insights.push({level:'success',text:`CR ${pct(cr)} melampaui target ${pct(targetCr)}`});
+  else insights.push({level:'success',text:`CR ${pct(cr)} memenuhi target ${pct(targetCr)}`});
  }
  // Benchmark vs rata-rata tim
  if(cur.leads>0&&teamAvg.cr>0){
@@ -66,40 +90,42 @@ function analyzeEntity(name,cur,prev,type,teamAvg,leadData,correctionCount){
   if(diff<=-30)insights.push({level:'danger',text:`CR jauh di bawah rata-rata tim (${pct(cr)} vs avg ${pct(teamAvg.cr)})`});
   else if(diff>=30)insights.push({level:'success',text:`CR di atas rata-rata tim (${pct(cr)} vs avg ${pct(teamAvg.cr)})`});
  }
- // CAQ, CAC, CPL, ROAS (advertiser only)
+ // CAQ vs target
  if(cur.spend>0&&cur.revenue>0){
-  if(caq>0.5)insights.push({level:'danger',text:`CAQ tinggi: ${pct(caq)} — separuh omzet habis untuk iklan`});
-  else if(caq>0.35)insights.push({level:'warning',text:`CAQ cukup tinggi: ${pct(caq)}`});
-  else if(caq<0.15)insights.push({level:'success',text:`CAQ efisien: ${pct(caq)}`});
+  if(caq>kpi.max_caq*1.3)insights.push({level:'danger',text:`CAQ ${pct(caq)} jauh di atas target ${pct(kpi.max_caq)}`});
+  else if(caq>kpi.max_caq)insights.push({level:'warning',text:`CAQ ${pct(caq)} di atas target ${pct(kpi.max_caq)}`});
+  else if(caq<kpi.max_caq*0.7)insights.push({level:'success',text:`CAQ ${pct(caq)} jauh di bawah target ${pct(kpi.max_caq)}`});
  }
+ // CAC vs target
  if(cur.spend>0&&cur.closing>0){
-  if(cac>200000)insights.push({level:'danger',text:`CAC mahal: ${money(cac)} per closing`});
-  else if(cac>120000)insights.push({level:'warning',text:`CAC cukup tinggi: ${money(cac)}`});
-  else if(cac<50000)insights.push({level:'success',text:`CAC murah: ${money(cac)}`});
+  if(cac>kpi.max_cac*1.3)insights.push({level:'danger',text:`CAC ${money(cac)} jauh di atas target ${money(kpi.max_cac)}`});
+  else if(cac>kpi.max_cac)insights.push({level:'warning',text:`CAC ${money(cac)} di atas target ${money(kpi.max_cac)}`});
+  else if(cac<kpi.max_cac*0.7)insights.push({level:'success',text:`CAC ${money(cac)} di bawah target ${money(kpi.max_cac)}`});
  }
+ // CPL vs target
  if(cur.spend>0&&cur.leads>0){
-  if(cpl>50000)insights.push({level:'danger',text:`CPL mahal: ${money(cpl)} per lead`});
-  else if(cpl>30000)insights.push({level:'warning',text:`CPL cukup tinggi: ${money(cpl)}`});
-  else if(cpl<15000)insights.push({level:'success',text:`CPL murah: ${money(cpl)}`});
+  if(cpl>kpi.max_cpl*1.3)insights.push({level:'danger',text:`CPL ${money(cpl)} jauh di atas target ${money(kpi.max_cpl)}`});
+  else if(cpl>kpi.max_cpl)insights.push({level:'warning',text:`CPL ${money(cpl)} di atas target ${money(kpi.max_cpl)}`});
+  else if(cpl<kpi.max_cpl*0.7)insights.push({level:'success',text:`CPL ${money(cpl)} di bawah target ${money(kpi.max_cpl)}`});
  }
+ // ROAS
  if(cur.spend>0){
-  if(roas<2)insights.push({level:'danger',text:`ROAS rendah: ${roas.toFixed(1)}× — iklan belum balik modal`});
-  else if(roas<3)insights.push({level:'warning',text:`ROAS cukup: ${roas.toFixed(1)}×`});
+  if(roas<2)insights.push({level:'danger',text:`ROAS rendah: ${roas.toFixed(1)}× — belum balik modal`});
   else if(roas>=5)insights.push({level:'success',text:`ROAS tinggi: ${roas.toFixed(1)}×`});
  }
  // Anomali
- if(cur.spend>0&&cur.closing===0&&cur.leads>0)insights.push({level:'danger',text:`Spend ${money(cur.spend)} tapi 0 closing — iklan tidak menghasilkan konversi`});
- if(cur.leads>5&&cur.closing===0)insights.push({level:'danger',text:`${num(cur.leads)} leads tapi 0 closing — leads tidak terkonversi`});
+ if(cur.spend>0&&cur.closing===0&&cur.leads>0)insights.push({level:'danger',text:`Spend ${money(cur.spend)} tapi 0 closing`});
+ if(cur.leads>5&&cur.closing===0)insights.push({level:'danger',text:`${num(cur.leads)} leads tapi 0 closing`});
  if(cur.leads===0&&cur.closing===0)insights.push({level:'warning',text:'Tidak ada aktivitas di periode ini'});
 
  // === CS-specific ===
  if(type==='cs'){
   const upsell=cur.closing?cur.units/cur.closing:0;
   if(cur.closing>0){
-   if(upsell>=2)insights.push({level:'success',text:`Upsell tinggi: ${upsell.toFixed(2)}×`});
-   else if(upsell<1.1)insights.push({level:'warning',text:`Upsell rendah: ${upsell.toFixed(2)}× — hampir tidak ada tambahan unit`});
+   if(upsell<kpi.min_upsell*0.7)insights.push({level:'danger',text:`Upsell ${upsell.toFixed(2)}× jauh di bawah target ${kpi.min_upsell.toFixed(2)}×`});
+   else if(upsell<kpi.min_upsell)insights.push({level:'warning',text:`Upsell ${upsell.toFixed(2)}× di bawah target ${kpi.min_upsell.toFixed(2)}×`});
+   else if(upsell>=kpi.min_upsell*1.3)insights.push({level:'success',text:`Upsell ${upsell.toFixed(2)}× melampaui target ${kpi.min_upsell.toFixed(2)}×`});
   }
-  // Tren upsell
   if(hasPrev){
    const prevUpsell=prev.closing?prev.units/prev.closing:0;
    if(prevUpsell>0&&upsell>0){
@@ -108,15 +134,13 @@ function analyzeEntity(name,cur,prev,type,teamAvg,leadData,correctionCount){
     else if(upDelta>=10)insights.push({level:'success',text:`Upsell naik (${prevUpsell.toFixed(2)}× → ${upsell.toFixed(2)}×)`});
    }
   }
-  // Lead quality (from leadReports)
   if(leadData&&leadData.total>0){
    const p=k=>(leadData[k]||0)/leadData.total;
-   if(p('passive')>0.4)insights.push({level:'danger',text:`${pct(p('passive'))} lead pasif — banyak lead tidak ditindaklanjuti`});
-   if(p('ooc')>0.25)insights.push({level:'warning',text:`${pct(p('ooc'))} lead OOC — banyak yang belum punya budget`});
-   if(p('consultation')>0.3&&cr<0.25)insights.push({level:'warning',text:`${pct(p('consultation'))} konsultasi tapi CR ${pct(cr)} — lead tertarik tapi gagal closing`});
-   if(p('boughtElsewhere')>0.1)insights.push({level:'warning',text:`${pct(p('boughtElsewhere'))} beli di tempat lain — kompetitor menang`});
+   if(p('passive')>0.4)insights.push({level:'danger',text:`${pct(p('passive'))} lead pasif — banyak tidak ditindaklanjuti`});
+   if(p('ooc')>0.25)insights.push({level:'warning',text:`${pct(p('ooc'))} lead OOC — belum punya budget`});
+   if(p('consultation')>0.3&&cr<targetCr)insights.push({level:'warning',text:`${pct(p('consultation'))} konsultasi tapi CR rendah — gagal closing`});
+   if(p('boughtElsewhere')>0.1)insights.push({level:'warning',text:`${pct(p('boughtElsewhere'))} beli di tempat lain`});
   }
-  // Koreksi
   if(correctionCount>3)insights.push({level:'warning',text:`${correctionCount} koreksi data — sering salah input`});
  }
 
@@ -125,7 +149,7 @@ function analyzeEntity(name,cur,prev,type,teamAvg,leadData,correctionCount){
  const score=insights.reduce((s,i)=>s+(i.level==='danger'?-2:i.level==='warning'?-1:i.level==='success'?1:0),0);
  const overall=score<=-2?'danger':score<0?'warning':score>=1?'success':'neutral';
 
- return {name,cur,prev,insights,overall,cr,caq,cac,cpl,roas,revDelta,leadsDelta,hasPrev};
+ return {name,cur,prev,insights,overall,cr,caq,cac,cpl,roas,revDelta,leadsDelta};
 }
 
 function aggregate(groups,byKey){
@@ -135,6 +159,19 @@ function aggregate(groups,byKey){
   for(const k of keys){
    if(!map[k])map[k]={leads:0,closing:0,units:0,revenue:0,spend:0};
    map[k].leads+=g.leads;map[k].closing+=g.closing;map[k].units+=g.units;map[k].revenue+=g.revenue;map[k].spend+=g.spend;
+  }
+ }
+ return map;
+}
+
+// Revenue per product per entity (for weighted KPI)
+function aggregateByProduct(groups,byKey){
+ const map={};
+ for(const g of groups){
+  const keys=byKey==='cs'?g.cs:[g[byKey]];
+  for(const k of keys){
+   if(!map[k])map[k]={};
+   map[k][g.product]=(map[k][g.product]||0)+g.revenue;
   }
  }
  return map;
@@ -152,6 +189,52 @@ function renderMarkdown(text){
   if(/^\d+\.\s/.test(t))return <li key={i} className="ai-li" dangerouslySetInnerHTML={{__html:bold(t.replace(/^\d+\.\s/,''))}}/>;
   return <p key={i} dangerouslySetInnerHTML={{__html:bold(t)}}/>;
  }).filter(Boolean);
+}
+
+function KpiSettings({catalog,kpiTargets,onSave}){
+ const products=catalog.map(c=>c.name).sort();
+ const[edits,setEdits]=useState(()=>{
+  const map={};
+  for(const p of products){
+   const existing=kpiTargets.find(k=>k.product===p);
+   map[p]=existing?{...existing}:{product:p,...DEFAULT_KPI};
+  }
+  return map;
+ });
+ const[saving,setSaving]=useState(null);
+
+ const update=(product,field,value)=>{
+  setEdits(prev=>({...prev,[product]:{...prev[product],[field]:value}}));
+ };
+
+ const save=async(product)=>{
+  setSaving(product);
+  const row=edits[product];
+  const existing=kpiTargets.find(k=>k.product===product);
+  await onSave({...row,id:existing?.id||undefined,product,updated_at:new Date().toISOString()});
+  setSaving(null);
+ };
+
+ return <div className="kpi-settings">
+  <div className="table-wrap"><table className="kpi-table">
+   <thead><tr>
+    <th>Produk</th><th>CAQ Max</th><th>CAC Max</th><th>CPL Max</th><th>CR Min (Adv)</th><th>CR Min (CS)</th><th>Upsell Min</th><th></th>
+   </tr></thead>
+   <tbody>{products.map(p=>{
+    const r=edits[p]||{...DEFAULT_KPI};
+    return <tr key={p}>
+     <td><strong>{p}</strong></td>
+     <td><input type="number" step="0.01" min="0" max="1" value={r.max_caq} onChange={e=>update(p,'max_caq',+e.target.value)}/><small>{pct(r.max_caq)}</small></td>
+     <td><input type="number" step="1000" min="0" value={r.max_cac} onChange={e=>update(p,'max_cac',+e.target.value)}/><small>{money(r.max_cac)}</small></td>
+     <td><input type="number" step="1000" min="0" value={r.max_cpl} onChange={e=>update(p,'max_cpl',+e.target.value)}/><small>{money(r.max_cpl)}</small></td>
+     <td><input type="number" step="0.01" min="0" max="1" value={r.min_cr} onChange={e=>update(p,'min_cr',+e.target.value)}/><small>{pct(r.min_cr)}</small></td>
+     <td><input type="number" step="0.01" min="0" max="1" value={r.min_cr_cs} onChange={e=>update(p,'min_cr_cs',+e.target.value)}/><small>{pct(r.min_cr_cs)}</small></td>
+     <td><input type="number" step="0.1" min="0" value={r.min_upsell} onChange={e=>update(p,'min_upsell',+e.target.value)}/><small>{r.min_upsell}×</small></td>
+     <td><button className="button" onClick={()=>save(p)} disabled={saving===p}>{saving===p?<Loader size={13} className="spin"/>:<Save size={13}/>}</button></td>
+    </tr>;
+   })}</tbody>
+  </table></div>
+ </div>;
 }
 
 function Card({analysis,type,hideSpend,aiSummary}){
@@ -189,10 +272,11 @@ function Card({analysis,type,hideSpend,aiSummary}){
  </div>;
 }
 
-export default function Evaluation({reports,ads,leadReports,corrections,period,hideSpend}){
+export default function Evaluation({reports,ads,leadReports,corrections,kpiTargets,catalog,period,hideSpend,role,onSaveKpi}){
  const[tab,setTab]=useState('advertiser');
  const[aiTexts,setAiTexts]=useState({});
  const[aiLoading,setAiLoading]=useState(false);
+ const[showKpi,setShowKpi]=useState(false);
  const aiKey=import.meta.env.VITE_CLAUDE_API_KEY||'';
 
  const {curGroups,prevGroups}=useMemo(()=>{
@@ -225,7 +309,6 @@ export default function Evaluation({reports,ads,leadReports,corrections,period,h
   return {curGroups:summarizeLocal(curR,curA),prevGroups:summarizeLocal(prevR,prevA)};
  },[reports,ads,period]);
 
- // Lead quality per CS
  const csLeadData=useMemo(()=>{
   if(!leadReports||!leadReports.length)return {};
   const {start,end}=period;
@@ -245,7 +328,6 @@ export default function Evaluation({reports,ads,leadReports,corrections,period,h
   return map;
  },[leadReports,reports,period]);
 
- // Correction count per CS
  const csCorrectionCount=useMemo(()=>{
   if(!corrections||!corrections.length)return {};
   const {start,end}=period;
@@ -260,7 +342,6 @@ export default function Evaluation({reports,ads,leadReports,corrections,period,h
   return map;
  },[corrections,reports,period]);
 
- // Team average for benchmark
  const teamAvg=useMemo(()=>{
   const key=tab==='advertiser'?'advertiser':'cs';
   const curMap=aggregate(curGroups,key);
@@ -275,17 +356,22 @@ export default function Evaluation({reports,ads,leadReports,corrections,period,h
   const key=tab==='advertiser'?'advertiser':'cs';
   const curMap=aggregate(curGroups,key);
   const prevMap=aggregate(prevGroups,key);
+  const prodRevMap=aggregateByProduct(curGroups,key);
   const allNames=[...new Set([...Object.keys(curMap),...Object.keys(prevMap)])];
   const zero={leads:0,closing:0,units:0,revenue:0,spend:0};
+  const targets=kpiTargets||[];
   return allNames
-   .map(n=>analyzeEntity(n,curMap[n]||zero,prevMap[n]||zero,key,teamAvg,
-    key==='cs'?csLeadData[n]:null,
-    key==='cs'?(csCorrectionCount[n]||0):0))
+   .map(n=>{
+    const kpi=weightedKpi(targets,prodRevMap[n]||{},key);
+    return analyzeEntity(n,curMap[n]||zero,prevMap[n]||zero,key,teamAvg,kpi,
+     key==='cs'?csLeadData[n]:null,
+     key==='cs'?(csCorrectionCount[n]||0):0);
+   })
    .sort((a,b)=>{
     const order={danger:0,warning:1,neutral:2,success:3};
     return (order[a.overall]-order[b.overall])||b.cur.revenue-a.cur.revenue;
    });
- },[curGroups,prevGroups,tab,teamAvg,csLeadData,csCorrectionCount]);
+ },[curGroups,prevGroups,tab,teamAvg,csLeadData,csCorrectionCount,kpiTargets]);
 
  const dangerCount=analyses.filter(a=>a.overall==='danger').length;
  const warnCount=analyses.filter(a=>a.overall==='warning').length;
@@ -309,7 +395,7 @@ export default function Evaluation({reports,ads,leadReports,corrections,period,h
    const prompt=`Kamu analis performa akuisisi digital marketing. Data ${tab==='advertiser'?'per advertiser':'per CS'} periode ini (rata-rata CR tim: ${pct(teamAvg.cr)}):\n\n${dataBlock}\n\n`+
     `Berikan evaluasi untuk SETIAP ${tab==='advertiser'?'advertiser':'CS'} dengan format:\n\n`+
     names.map(n=>`[${n}]\n(tulis 2-3 kalimat evaluasi + 1 rekomendasi aksi)`).join('\n\n')+
-    `\n\nAturan:\n- Format: [Nama] diikuti paragraf evaluasi\n- Bahasa Indonesia, to the point, tidak bertele-tele\n- Jangan pakai heading (#), bullet (-), atau numbering\n- Sebutkan angka penting, bandingkan dengan rata-rata tim\n- Rekomendasi harus spesifik dan actionable`;
+    `\n\nAturan:\n- Format: [Nama] diikuti paragraf evaluasi\n- Bahasa Indonesia, to the point\n- Jangan pakai heading (#), bullet (-), atau numbering\n- Sebutkan angka penting, bandingkan dengan target KPI dan rata-rata tim\n- Rekomendasi harus spesifik dan actionable`;
 
    const res=await fetch('https://api.anthropic.com/v1/messages',{
     method:'POST',
@@ -344,14 +430,20 @@ export default function Evaluation({reports,ads,leadReports,corrections,period,h
    <div className="eval-summary-item eval-success-bg"><CheckCircle2 size={16}/><strong>{goodCount}</strong> Performa baik</div>
   </div>
 
-  <div className="eval-tabs">
-   <button className={tab==='advertiser'?'active':''} onClick={()=>setTab('advertiser')}>Advertiser ({analyses.length})</button>
-   <button className={tab==='cs'?'active':''} onClick={()=>setTab('cs')}>CS ({analyses.length})</button>
+  <div className="eval-controls">
+   <div className="eval-tabs">
+    <button className={tab==='advertiser'?'active':''} onClick={()=>setTab('advertiser')}>Advertiser ({analyses.length})</button>
+    <button className={tab==='cs'?'active':''} onClick={()=>setTab('cs')}>CS ({analyses.length})</button>
+   </div>
+   <div className="eval-actions">
+    {role==='admin'&&<button className={`button ${showKpi?'primary':''}`} onClick={()=>setShowKpi(!showKpi)}><Settings size={15}/>{showKpi?'Tutup KPI':'Atur KPI'}</button>}
+    {aiKey&&<button className="button primary" onClick={generateAll} disabled={aiLoading}>
+     {aiLoading?<><Loader size={15} className="spin"/>Menganalisis...</>:<><Zap size={15}/>Ringkasan AI</>}
+    </button>}
+   </div>
   </div>
 
-  {aiKey&&<button className="button primary" onClick={generateAll} disabled={aiLoading} style={{alignSelf:'flex-start'}}>
-   {aiLoading?<><Loader size={15} className="spin"/>Menganalisis semua {tab==='advertiser'?'advertiser':'CS'}...</>:<><Zap size={15}/>Ringkasan AI Semua {tab==='advertiser'?'Advertiser':'CS'}</>}
-  </button>}
+  {showKpi&&role==='admin'&&<KpiSettings catalog={catalog||[]} kpiTargets={kpiTargets||[]} onSave={onSaveKpi}/>}
 
   <div className="eval-cards">
    {analyses.map(a=><Card key={a.name} analysis={a} type={tab} hideSpend={hideSpend}
