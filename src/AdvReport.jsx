@@ -2,9 +2,11 @@ import React,{useState}from'react';import{ChevronDown,ChevronRight,Inbox}from'lu
 const money=n=>new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n||0);
 const num=n=>new Intl.NumberFormat('id-ID').format(n||0);
 const pct=n=>`${(n*100).toFixed(1)}%`;
+function StatCells({d,hideSpend}){return<>{num(d.leads)}</>;} // placeholder replaced below
 export default function AdvReport({groups,hideSpend}){
  const[expanded,setExpanded]=useState(new Set());
  const[expandedProds,setExpandedProds]=useState(new Set());
+ const[expandedPlats,setExpandedPlats]=useState(new Set());
  const byAdv={};
  for(const g of groups){
   const k=g.advertiser;
@@ -12,19 +14,33 @@ export default function AdvReport({groups,hideSpend}){
   const a=byAdv[k];
   a.leads+=g.leads;a.closing+=g.closing;a.units+=g.units;a.revenue+=g.revenue;a.spend+=g.spend;
   const pk=g.product;
-  if(!a.products[pk])a.products[pk]={product:g.product,leads:0,closing:0,units:0,revenue:0,spend:0,channels:{}};
+  if(!a.products[pk])a.products[pk]={product:g.product,leads:0,closing:0,units:0,revenue:0,spend:0,platforms:{}};
   const p=a.products[pk];
   p.leads+=g.leads;p.closing+=g.closing;p.units+=g.units;p.revenue+=g.revenue;p.spend+=g.spend;
+  const plat=g.platform||'Meta';
+  if(!p.platforms[plat])p.platforms[plat]={platform:plat,leads:0,closing:0,units:0,revenue:0,spend:0,channels:{}};
+  const pl=p.platforms[plat];
+  pl.leads+=g.leads;pl.closing+=g.closing;pl.units+=g.units;pl.revenue+=g.revenue;pl.spend+=g.spend;
   const ch=g.channel;
-  if(!p.channels[ch])p.channels[ch]={channel:ch,leads:0,closing:0,units:0,revenue:0,spend:0};
-  const c=p.channels[ch];
+  if(!pl.channels[ch])pl.channels[ch]={channel:ch,leads:0,closing:0,units:0,revenue:0,spend:0};
+  const c=pl.channels[ch];
   c.leads+=g.leads;c.closing+=g.closing;c.units+=g.units;c.revenue+=g.revenue;c.spend+=g.spend;
  }
  const rows=Object.values(byAdv).sort((a,b)=>b.revenue-a.revenue);
  function toggle(name){setExpanded(prev=>{const next=new Set(prev);if(next.has(name))next.delete(name);else next.add(name);return next})}
  function toggleProd(key){setExpandedProds(prev=>{const next=new Set(prev);if(next.has(key))next.delete(key);else next.add(key);return next})}
+ function togglePlat(key){setExpandedPlats(prev=>{const next=new Set(prev);if(next.has(key))next.delete(key);else next.add(key);return next})}
  if(!rows.length)return <div className="empty"><Inbox size={30}/><strong>Belum ada data advertiser</strong><p>Ubah filter atau tunggu laporan masuk.</p></div>;
  const uniqueProducts=r=>[...new Set(Object.keys(r.products))];
+ const dataCells=(d,hs)=><>
+  <td>{num(d.leads)}</td>
+  <td>{num(d.closing)}</td>
+  <td><span className="rate">{pct(d.leads?d.closing/d.leads:0)}</span></td>
+  {!hs&&<td>{money(d.spend)}</td>}
+  <td className="money">{money(d.revenue)}</td>
+  {!hs&&<td>{d.closing&&d.spend?money(d.spend/d.closing):'—'}</td>}
+  {!hs&&<td>{d.revenue&&d.spend?pct(d.spend/d.revenue):'—'}</td>}
+ </>;
  return <>{rows.map((r,i)=>{
   const isOpen=expanded.has(r.advertiser);
   const prods=Object.values(r.products).sort((a,b)=>b.revenue-a.revenue);
@@ -47,29 +63,28 @@ export default function AdvReport({groups,hideSpend}){
     <div className="table-wrap"><ResponsiveTable><thead><tr><th>Produk</th><th>Leads</th><th>Closing</th><th>CR</th>{!hideSpend&&<th>Biaya iklan</th>}<th>Omzet</th>{!hideSpend&&<th>CAC</th>}{!hideSpend&&<th>CAQ</th>}</tr></thead><tbody>{prods.map(d=>{
      const prodKey=r.advertiser+'|'+d.product;
      const isProdOpen=expandedProds.has(prodKey);
-     const channels=Object.values(d.channels).sort((a,b)=>b.revenue-a.revenue);
-     const hasChannels=channels.length>1;
+     const platforms=Object.values(d.platforms).sort((a,b)=>b.revenue-a.revenue);
+     const canExpand=platforms.length>1||(platforms.length===1&&Object.keys(platforms[0].channels).length>1);
      return <React.Fragment key={d.product}>
-      <tr onClick={hasChannels?()=>toggleProd(prodKey):undefined} style={hasChannels?{cursor:'pointer'}:undefined}>
-       <td><strong style={{display:'flex',alignItems:'center',gap:4}}>{hasChannels&&(isProdOpen?<ChevronDown size={13}/>:<ChevronRight size={13}/>)}{d.product}</strong></td>
-       <td>{num(d.leads)}</td>
-       <td>{num(d.closing)}</td>
-       <td><span className="rate">{pct(d.leads?d.closing/d.leads:0)}</span></td>
-       {!hideSpend&&<td>{money(d.spend)}</td>}
-       <td className="money">{money(d.revenue)}</td>
-       {!hideSpend&&<td>{d.closing&&d.spend?money(d.spend/d.closing):'—'}</td>}
-       {!hideSpend&&<td>{d.revenue&&d.spend?pct(d.spend/d.revenue):'—'}</td>}
+      <tr onClick={canExpand?()=>toggleProd(prodKey):undefined} style={canExpand?{cursor:'pointer'}:undefined}>
+       <td><strong style={{display:'flex',alignItems:'center',gap:4}}>{canExpand&&(isProdOpen?<ChevronDown size={13}/>:<ChevronRight size={13}/>)}{d.product}</strong></td>
+       {dataCells(d,hideSpend)}
       </tr>
-      {isProdOpen&&channels.map(c=><tr key={c.channel} style={{background:'#f4f9fd'}}>
-       <td style={{paddingLeft:38}}><span className="badge" style={{fontSize:9}}>{c.channel}</span></td>
-       <td>{num(c.leads)}</td>
-       <td>{num(c.closing)}</td>
-       <td><span className="rate">{pct(c.leads?c.closing/c.leads:0)}</span></td>
-       {!hideSpend&&<td>{money(c.spend)}</td>}
-       <td className="money">{money(c.revenue)}</td>
-       {!hideSpend&&<td>{c.closing&&c.spend?money(c.spend/c.closing):'—'}</td>}
-       {!hideSpend&&<td>{c.revenue&&c.spend?pct(c.spend/c.revenue):'—'}</td>}
-      </tr>)}
+      {isProdOpen&&platforms.map(pl=>{
+       const platKey=prodKey+'|'+pl.platform;
+       const isPlatOpen=expandedPlats.has(platKey);
+       const channels=Object.values(pl.channels).sort((a,b)=>b.revenue-a.revenue);
+       const platCanExpand=channels.length>1;
+       return <React.Fragment key={pl.platform}>
+        <tr onClick={platCanExpand?()=>togglePlat(platKey):undefined} style={{background:'#f4f9fd',cursor:platCanExpand?'pointer':undefined}}>
+         <td style={{paddingLeft:34}}><span style={{display:'flex',alignItems:'center',gap:4}}>{platCanExpand&&(isPlatOpen?<ChevronDown size={11}/>:<ChevronRight size={11}/>)}<span className="badge" style={{fontSize:9}}>{pl.platform}</span></span></td>
+         {dataCells(pl,hideSpend)}
+        </tr>
+        {isPlatOpen&&channels.map(c=><tr key={c.channel} style={{background:'#edf3f8'}}>
+         <td style={{paddingLeft:56}}><span className="badge" style={{fontSize:9}}>{c.channel}</span></td>
+         {dataCells(c,hideSpend)}
+        </tr>)}
+       </React.Fragment>})}
      </React.Fragment>})}</tbody></ResponsiveTable></div>
    </div>}
   </section>})}</>;
