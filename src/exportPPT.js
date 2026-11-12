@@ -23,7 +23,7 @@ function roundRect(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x
 async function generateSlideImage(canvasBase64, slideTitle, onStatus){
  const prompt=`Transform this data visualization into a professional, modern PowerPoint presentation slide. Keep all text, numbers, and data exactly as shown - do not change any values. Make the design clean, corporate, and visually appealing with subtle gradients, clean typography, and professional color scheme using dark teal (#073b56) as primary color. The slide title is "${slideTitle}". Make it look like a premium consulting firm's presentation. 16:9 widescreen format.`;
  onStatus?.(`Generating: ${slideTitle}...`);
- const resp=await fetch(KIE_API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'generate_image',images:[{base64:canvasBase64,mime_type:'image/png'}],prompt,aspect_ratio:'16:9',resolution:'2K',background:'opaque'})});
+ const resp=await fetch(KIE_API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'generate_image',images:[{base64:canvasBase64,mime_type:'image/png'}],prompt,aspect_ratio:'16:9',resolution:'1K',background:'auto'})});
  const data=await resp.json();
  if(!data.ok)throw new Error(data.error||'Gagal memulai generate');
  const taskId=data.task_id;
