@@ -545,11 +545,12 @@ export function createLaporanBridgeHandler() {
               packageLines: report.packageLines
             });
           } else {
-            // Check if report already exists for this date+cs+product+advertiser+channel
+            // Check if report already exists for this date+cs+product+advertiser+channel+platform
             const dup = await db.query('reports', {
               date: `eq.${report.date}`, cs: `eq.${report.cs}`,
               product: `eq.${report.product}`, advertiser: `eq.${report.advertiser}`,
               channel: `eq.${report.channel}`,
+              platform: `eq.${report.platform || 'Meta'}`,
               select: 'id', limit: '1'
             });
             if (dup.length) {
