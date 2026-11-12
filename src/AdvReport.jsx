@@ -1,12 +1,12 @@
-import React,{useState}from'react';import{ChevronDown,ChevronRight,Inbox}from'lucide-react';import ResponsiveTable from'./ResponsiveTable';
+import React,{useState}from'react';import{ChevronDown,ChevronRight,Inbox,AlertCircle}from'lucide-react';import ResponsiveTable from'./ResponsiveTable';
 const money=n=>new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n||0);
 const num=n=>new Intl.NumberFormat('id-ID').format(n||0);
 const pct=n=>`${(n*100).toFixed(1)}%`;
-function StatCells({d,hideSpend}){return<>{num(d.leads)}</>;} // placeholder replaced below
-export default function AdvReport({groups,hideSpend}){
+export default function AdvReport({groups,hideSpend,ads,assignments}){
  const[expanded,setExpanded]=useState(new Set());
  const[expandedProds,setExpandedProds]=useState(new Set());
  const[expandedPlats,setExpandedPlats]=useState(new Set());
+ const[showMissing,setShowMissing]=useState(true);
  const byAdv={};
  for(const g of groups){
   const k=g.advertiser;
@@ -27,10 +27,12 @@ export default function AdvReport({groups,hideSpend}){
   c.leads+=g.leads;c.closing+=g.closing;c.units+=g.units;c.revenue+=g.revenue;c.spend+=g.spend;
  }
  const rows=Object.values(byAdv).sort((a,b)=>b.revenue-a.revenue);
+ const reportedAdv=new Set((ads||[]).map(a=>a.advertiser.toLowerCase()));
+ const activeAssignments=(assignments||[]).filter(a=>a.active);
+ const missingAdv=[...new Set(activeAssignments.map(a=>a.advertiser))].filter(adv=>!reportedAdv.has(adv.toLowerCase())).sort();
  function toggle(name){setExpanded(prev=>{const next=new Set(prev);if(next.has(name))next.delete(name);else next.add(name);return next})}
  function toggleProd(key){setExpandedProds(prev=>{const next=new Set(prev);if(next.has(key))next.delete(key);else next.add(key);return next})}
  function togglePlat(key){setExpandedPlats(prev=>{const next=new Set(prev);if(next.has(key))next.delete(key);else next.add(key);return next})}
- if(!rows.length)return <div className="empty"><Inbox size={30}/><strong>Belum ada data advertiser</strong><p>Ubah filter atau tunggu laporan masuk.</p></div>;
  const uniqueProducts=r=>[...new Set(Object.keys(r.products))];
  const dataCells=(d,hs)=><>
   <td>{num(d.leads)}</td>
@@ -41,7 +43,15 @@ export default function AdvReport({groups,hideSpend}){
   {!hs&&<td>{d.closing&&d.spend?money(d.spend/d.closing):'—'}</td>}
   {!hs&&<td>{d.revenue&&d.spend?pct(d.spend/d.revenue):'—'}</td>}
  </>;
- return <>{rows.map((r,i)=>{
+ return <>{missingAdv.length>0&&<section className="card" style={{marginBottom:16,borderColor:'#f1d7ce'}}>
+  <div className="card-head" style={{cursor:'pointer',paddingBottom:showMissing?0:17}} onClick={()=>setShowMissing(v=>!v)}>
+   <div style={{display:'flex',alignItems:'center',gap:8}}><AlertCircle size={16} color="#a35343"/><div><h2 style={{color:'#a35343'}}>Belum laporan <span className="count" style={{background:'#fbefeb',color:'#a35343'}}>{missingAdv.length}</span></h2><p>Advertiser yang punya penugasan aktif tapi belum input biaya iklan di periode ini.</p></div></div>
+   {showMissing?<ChevronDown size={16}/>:<ChevronRight size={16}/>}
+  </div>
+  {showMissing&&<div style={{padding:'0 22px 16px',display:'flex',flexWrap:'wrap',gap:8}}>{missingAdv.map(adv=><span key={adv} style={{display:'flex',alignItems:'center',gap:6,background:'#fbefeb',border:'1px solid #f1d7ce',borderRadius:6,padding:'6px 12px',fontSize:12,color:'#a35343'}}><span className="person-avatar" style={{width:24,height:24,fontSize:8,background:'#f1d7ce',color:'#a35343'}}>{adv.slice(0,2).toUpperCase()}</span>{adv}</span>)}</div>}
+ </section>}
+ {!rows.length&&!missingAdv.length&&<div className="empty"><Inbox size={30}/><strong>Belum ada data advertiser</strong><p>Ubah filter atau tunggu laporan masuk.</p></div>}
+ {rows.map((r,i)=>{
   const isOpen=expanded.has(r.advertiser);
   const prods=Object.values(r.products).sort((a,b)=>b.revenue-a.revenue);
   return <section key={r.advertiser} className="card adv-card" style={{marginBottom:12}}>
