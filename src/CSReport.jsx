@@ -2,19 +2,19 @@ import React,{useState}from'react';import{ChevronDown,ChevronRight,Inbox}from'lu
 const money=n=>new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n||0);
 const num=n=>new Intl.NumberFormat('id-ID').format(n||0);
 const pct=n=>`${(n*100).toFixed(1)}%`;
-export default function CSReport({groups,hideSpend}){
+export default function CSReport({reports,hideSpend}){
  const[expanded,setExpanded]=useState(new Set());
  const byCS={};
- for(const g of groups){
-  for(const cs of g.cs){
-   if(!byCS[cs])byCS[cs]={cs,leads:0,closing:0,units:0,revenue:0,spend:0,products:{}};
-   const a=byCS[cs];
-   a.leads+=g.leads;a.closing+=g.closing;a.units+=g.units;a.revenue+=g.revenue;a.spend+=g.spend;
-   const pk=g.product;
-   if(!a.products[pk])a.products[pk]={product:g.product,leads:0,closing:0,units:0,revenue:0,spend:0};
-   const p=a.products[pk];
-   p.leads+=g.leads;p.closing+=g.closing;p.units+=g.units;p.revenue+=g.revenue;p.spend+=g.spend;
-  }
+ for(const r of reports){
+  const cs=r.cs;
+  if(!byCS[cs])byCS[cs]={cs,leads:0,closing:0,units:0,revenue:0,spend:0,products:{}};
+  const a=byCS[cs];
+  const leads=Number(r.leads),closing=Number(r.closing)-Number(r.invalid),units=Number(r.units)-Number(r.invalidUnits),revenue=Number(r.revenue);
+  a.leads+=leads;a.closing+=closing;a.units+=units;a.revenue+=revenue;
+  const pk=r.product;
+  if(!a.products[pk])a.products[pk]={product:r.product,leads:0,closing:0,units:0,revenue:0,spend:0};
+  const p=a.products[pk];
+  p.leads+=leads;p.closing+=closing;p.units+=units;p.revenue+=revenue;
  }
  const rows=Object.values(byCS).sort((a,b)=>b.revenue-a.revenue);
  function toggle(name){setExpanded(prev=>{const next=new Set(prev);if(next.has(name))next.delete(name);else next.add(name);return next})}
