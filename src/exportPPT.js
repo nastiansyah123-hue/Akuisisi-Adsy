@@ -254,6 +254,109 @@ function renderProductCanvas(rows){
  return canvasToBase64(canvas);
 }
 
+// ── Insights / Evaluasi ──
+function generateInsights(groups,filtered,advRows,csRows,prodRows,total,hideSpend){
+ const findings=[];
+ // 1. Top & bottom advertiser by revenue
+ if(advRows.length>=2){
+  const top=advRows[0];
+  findings.push({icon:'🏆',color:B.green,text:`Advertiser terbaik: ${top.advertiser} dengan omzet ${money(top.revenue)} (${pct(top.revenue/total.revenue)} dari total).`});
+  const bot=advRows[advRows.length-1];
+  findings.push({icon:'📉',color:'#d97706',text:`Advertiser terendah: ${bot.advertiser} dengan omzet ${money(bot.revenue)} (${pct(bot.revenue/total.revenue)} dari total).`});
+ }
+ // 2. Top & bottom CS by CR (min 5 leads)
+ const csWithCR=csRows.filter(c=>c.leads>=5).map(c=>({...c,cr:c.closing/c.leads}));
+ if(csWithCR.length>=2){
+  const best=csWithCR.sort((a,b)=>b.cr-a.cr)[0];
+  findings.push({icon:'⭐',color:B.green,text:`CS closing rate tertinggi: ${best.cs} dengan CR ${pct(best.cr)} (${num(best.closing)}/${num(best.leads)} leads).`});
+  const worst=csWithCR[csWithCR.length-1];
+  findings.push({icon:'⚠️',color:'#d97706',text:`CS closing rate terendah: ${worst.cs} dengan CR ${pct(worst.cr)} (${num(worst.closing)}/${num(worst.leads)} leads). Perlu evaluasi.`});
+ }
+ // 3. CS with most leads
+ if(csRows.length){
+  const topLeads=[...csRows].sort((a,b)=>b.leads-a.leads)[0];
+  findings.push({icon:'📊',color:B.blue,text:`CS paling banyak leads: ${topLeads.cs} menangani ${num(topLeads.leads)} leads dengan omzet ${money(topLeads.revenue)}.`});
+ }
+ // 4. Product dominance
+ if(prodRows.length>=2){
+  const topProd=prodRows[0];
+  findings.push({icon:'📦',color:B.mid,text:`Produk unggulan: ${topProd.product} menyumbang ${pct(topProd.revenue/total.revenue)} total omzet (${money(topProd.revenue)}).`});
+  const lowProd=prodRows[prodRows.length-1];
+  if(lowProd.revenue<total.revenue*0.05){
+   findings.push({icon:'💡',color:'#d97706',text:`Produk ${lowProd.product} hanya ${pct(lowProd.revenue/total.revenue)} dari total. Pertimbangkan strategi boost.`});
+  }
+ }
+ // 5. CR overall
+ const overallCR=total.leads?total.closing/total.leads:0;
+ if(overallCR<0.05)findings.push({icon:'🔴',color:'#ef4444',text:`Closing rate keseluruhan rendah: ${pct(overallCR)}. Target minimal 5-10%.`});
+ else if(overallCR>=0.15)findings.push({icon:'🟢',color:B.green,text:`Closing rate keseluruhan sangat baik: ${pct(overallCR)}.`});
+ else findings.push({icon:'🟡',color:'#d97706',text:`Closing rate keseluruhan ${pct(overallCR)}. Masih ada ruang untuk ditingkatkan.`});
+ // 6. CAQ (if applicable)
+ if(!hideSpend&&total.spend&&total.revenue){
+  const caq=total.spend/total.revenue;
+  if(caq>0.3)findings.push({icon:'💸',color:'#ef4444',text:`CAQ ${pct(caq)} cukup tinggi. Biaya iklan sudah ${pct(caq)} dari omzet — evaluasi efisiensi.`});
+  else if(caq<=0.15)findings.push({icon:'💰',color:B.green,text:`CAQ ${pct(caq)} sangat efisien. Biaya iklan hanya ${pct(caq)} dari omzet.`});
+ }
+ // 7. Upsell analysis
+ if(total.closing>0){
+  const upsell=total.units/total.closing;
+  if(upsell>=1.5)findings.push({icon:'🔥',color:B.green,text:`Upsell rate ${upsell.toFixed(2)}× — tim berhasil mendorong pembelian lebih dari 1 unit.`});
+  else if(upsell<1.1)findings.push({icon:'📌',color:'#d97706',text:`Upsell rate ${upsell.toFixed(2)}× — hampir semua beli 1 unit saja. Dorong strategi bundling/upsell.`});
+ }
+ // 8. Daily trend (first half vs second half of period)
+ const byDate={};
+ for(const g of groups){if(!byDate[g.date])byDate[g.date]=0;byDate[g.date]+=g.revenue;}
+ const dates=Object.keys(byDate).sort();
+ if(dates.length>=4){
+  const mid=Math.floor(dates.length/2);
+  const first=dates.slice(0,mid).reduce((s,d)=>s+byDate[d],0)/mid;
+  const second=dates.slice(mid).reduce((s,d)=>s+byDate[d],0)/(dates.length-mid);
+  const change=(second-first)/first;
+  if(change>0.1)findings.push({icon:'📈',color:B.green,text:`Tren positif: omzet harian naik ~${pct(change)} di paruh kedua periode.`});
+  else if(change<-0.1)findings.push({icon:'📉',color:'#ef4444',text:`Tren menurun: omzet harian turun ~${pct(Math.abs(change))} di paruh kedua periode. Perlu perhatian.`});
+  else findings.push({icon:'➡️',color:B.accent,text:`Tren stabil: omzet harian relatif konsisten sepanjang periode.`});
+ }
+ return findings;
+}
+
+function renderInsightsCanvas(findings,period){
+ const rowH=42;
+ const totalH=Math.max(540,120+findings.length*rowH);
+ const{canvas,ctx,w,h}=createCanvas(960,totalH);
+ ctx.fillStyle=B.white;ctx.fillRect(0,0,w,h);
+ ctx.fillStyle=B.mid;ctx.fillRect(0,0,w,5);
+ // title
+ ctx.fillStyle=B.dark;ctx.font='bold 24px Arial';ctx.fillText('Temuan & Evaluasi',50,50);
+ ctx.fillStyle=B.accent;ctx.font='12px Arial';ctx.fillText(period,50,72);
+ // subtitle
+ ctx.fillStyle=B.accent;ctx.font='11px Arial';ctx.fillText('Analisis otomatis berdasarkan data periode ini',50,92);
+ // findings
+ findings.forEach((f,i)=>{
+  const y=115+i*rowH;
+  // card bg
+  ctx.fillStyle=i%2===0?'#f8fafb':'#ffffff';
+  roundRect(ctx,40,y,w-80,rowH-4,6);ctx.fill();
+  // left color bar
+  ctx.fillStyle=f.color;ctx.fillRect(40,y,4,rowH-4);
+  // icon
+  ctx.font='16px Arial';ctx.fillText(f.icon,56,y+24);
+  // text
+  ctx.fillStyle=B.dark;ctx.font='12px Arial';
+  // word wrap
+  const maxW=w-140;
+  const words=f.text.split(' ');
+  let line='',ly=y+20;
+  for(const word of words){
+   const test=line+word+' ';
+   if(ctx.measureText(test).width>maxW&&line){
+    ctx.fillText(line.trim(),80,ly);ly+=15;line=word+' ';
+   }else{line=test;}
+  }
+  if(line)ctx.fillText(line.trim(),80,ly);
+ });
+ return canvasToBase64(canvas);
+}
+
 // ── Aggregate helpers ──
 function aggregateAdv(groups){
  const byAdv={};
@@ -292,9 +395,11 @@ export async function exportPPT({groups,filtered,total,kpis,hideSpend,period,onS
 
  // Step 1: Render all slides to canvas
  onStatus?.('Menyiapkan slide...');
+ const findings=generateInsights(groups,filtered,advRows,csRows,prodRows,total,hideSpend);
  const slides=[
   {title:'Cover',base64:renderCoverCanvas(period)},
   {title:'Ringkasan Performa',base64:renderSummaryCanvas(total,kpis,hideSpend,period)},
+  {title:'Temuan & Evaluasi',base64:renderInsightsCanvas(findings,period)},
   {title:'Performa Advertiser',base64:renderAdvBarCanvas(advRows)},
   {title:'Detail Advertiser',base64:renderAdvTableCanvas(advRows,hideSpend)},
   {title:'Performa CS',base64:renderCSCanvas(csRows)},
