@@ -19,31 +19,65 @@ function createCanvas(w,h){const c=document.createElement('canvas');c.width=w*2;
 function canvasToBase64(c){return c.toDataURL('image/png').split(',')[1];}
 function roundRect(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();}
 
-// ── kie.ai integration ──
-async function generateSlideImage(canvasBase64, slideTitle, onStatus){
- const prompt=`Transform this data visualization into a professional, modern PowerPoint presentation slide. Keep all text, numbers, and data exactly as shown - do not change any values. Make the design clean, corporate, and visually appealing with subtle gradients, clean typography, and professional color scheme using dark teal (#073b56) as primary color. The slide title is "${slideTitle}". Make it look like a premium consulting firm's presentation. 16:9 widescreen format.`;
- onStatus?.(`Generating: ${slideTitle}...`);
- const resp=await fetch(KIE_API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'generate_image',images:[{base64:canvasBase64,mime_type:'image/png'}],prompt,aspect_ratio:'16:9',resolution:'1K',background:'auto'})});
+// ── kie.ai integration (parallel) ──
+function slidePrompt(title){
+ return `Transform this data visualization into a professional, modern PowerPoint presentation slide. Keep all text, numbers, and data exactly as shown - do not change any values. Make the design clean, corporate, and visually appealing with subtle gradients, clean typography, and professional color scheme using dark teal (#073b56) as primary color. The slide title is "${title}". Make it look like a premium consulting firm's presentation. 16:9 widescreen format.`;
+}
+
+async function submitTask(base64,title){
+ const resp=await fetch(KIE_API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'generate_image',images:[{base64,mime_type:'image/png'}],prompt:slidePrompt(title),aspect_ratio:'16:9',resolution:'1K',background:'auto'})});
+ if(!resp.ok)throw new Error(`API error ${resp.status}`);
  const data=await resp.json();
+ console.log(`Task created for "${title}":`,data);
  if(!data.ok)throw new Error(data.error||'Gagal memulai generate');
- const taskId=data.task_id;
- // Poll
- for(let i=0;i<80;i++){
-  await new Promise(r=>setTimeout(r,3000));
-  onStatus?.(`Generating: ${slideTitle}... (${(i+1)*3}s)`);
-  const pr=await fetch(KIE_API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'check_image_task',task_id:taskId,ref_files:data.ref_files||[]})});
-  const pd=await pr.json();
-  if(!pd.ok)continue;
-  if(pd.state==='success'&&pd.result_urls?.length)return pd.result_urls[0];
-  if(pd.state==='fail')throw new Error(pd.fail_msg||'Generate gagal');
+ return {taskId:data.task_id,refFiles:data.ref_files||[]};
+}
+
+async function pollAllTasks(tasks,onStatus){
+ // tasks = [{title, taskId, refFiles, base64(fallback)}, ...]
+ const results=new Array(tasks.length).fill(null);
+ const done=new Set();
+ for(let attempt=0;attempt<80;attempt++){
+  await new Promise(r=>setTimeout(r,4000));
+  const pending=tasks.filter((_,i)=>!done.has(i));
+  if(!pending.length)break;
+  const doneCount=done.size;
+  onStatus?.(`⏳ AI generate: ${doneCount}/${tasks.length} selesai, ${pending.length} proses... (${(attempt+1)*4}s)`);
+  // Poll all pending in parallel
+  await Promise.all(pending.map(async(t)=>{
+   const idx=tasks.indexOf(t);
+   try{
+    const pr=await fetch(KIE_API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'check_image_task',task_id:t.taskId,ref_files:t.refFiles})});
+    const pd=await pr.json();
+    console.log(`Poll ${attempt+1} "${t.title}":`,pd);
+    if(pd.state==='success'&&pd.result_urls?.length){
+     results[idx]=pd.result_urls[0];
+     done.add(idx);
+     onStatus?.(`✅ ${t.title} selesai! (${done.size}/${tasks.length})`);
+    }else if(pd.state==='fail'){
+     console.warn(`"${t.title}" failed:`,pd.fail_msg);
+     results[idx]=null;
+     done.add(idx);
+    }
+   }catch(e){console.warn(`Poll error "${t.title}":`,e.message);}
+  }));
  }
- throw new Error('Timeout: generate terlalu lama');
+ return results;
 }
 
 async function fetchImageAsBase64(url){
- const resp=await fetch(url);
- const blob=await resp.blob();
- return new Promise(r=>{const fr=new FileReader();fr.onload=()=>r(fr.result.split(',')[1]);fr.readAsDataURL(blob);});
+ try{
+  const resp=await fetch(url);
+  if(!resp.ok)throw new Error(`HTTP ${resp.status}`);
+  const blob=await resp.blob();
+  return new Promise(r=>{const fr=new FileReader();fr.onload=()=>r(fr.result.split(',')[1]);fr.readAsDataURL(blob);});
+ }catch(e){
+  console.warn('Direct fetch failed, trying proxy:',e.message);
+  const resp=await fetch(KIE_API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'proxy_image',url})});
+  const data=await resp.json();
+  if(data.ok&&data.base64)return data.base64;
+  throw new Error('Gagal download gambar: '+e.message);
+ }
 }
 
 // ── Render slide canvases ──
@@ -267,21 +301,43 @@ export async function exportPPT({groups,filtered,total,kpis,hideSpend,period,onS
   {title:'Kontribusi Produk',base64:renderProductCanvas(prodRows)},
  ];
 
- // Step 2: Generate each slide via kie.ai
- const aiImages=[];
- for(let i=0;i<slides.length;i++){
-  const s=slides[i];
+ // Step 2: Submit ALL tasks in parallel
+ onStatus?.(`🚀 Mengirim ${slides.length} slide ke AI sekaligus...`);
+ const tasks=await Promise.all(slides.map(async(s,i)=>{
   try{
-   onStatus?.(`AI generate slide ${i+1}/${slides.length}: ${s.title}...`);
-   const url=await generateSlideImage(s.base64,s.title,onStatus);
-   const b64=await fetchImageAsBase64(url);
-   aiImages.push(b64);
+   const{taskId,refFiles}=await submitTask(s.base64,s.title);
+   onStatus?.(`📤 Slide ${i+1}/${slides.length} terkirim (${s.title})`);
+   return {title:s.title,taskId,refFiles,fallback:s.base64};
   }catch(e){
-   console.warn(`Slide ${s.title} AI failed, using canvas fallback:`,e.message);
-   onStatus?.(`Slide ${s.title}: fallback (${e.message})`);
-   aiImages.push(s.base64);
+   console.warn(`Submit "${s.title}" failed:`,e.message);
+   return {title:s.title,taskId:null,refFiles:[],fallback:s.base64,failed:true};
   }
+ }));
+
+ // Step 3: Poll all tasks together until done
+ const activeTasks=tasks.filter(t=>!t.failed);
+ const resultUrls=activeTasks.length?await pollAllTasks(activeTasks,onStatus):[];
+
+ // Step 4: Download result images in parallel
+ onStatus?.(`📥 Mengunduh ${activeTasks.length} gambar hasil...`);
+ const aiImages=[];
+ let aiOk=0,aiFail=0;
+ for(let i=0;i<slides.length;i++){
+  const t=tasks[i];
+  if(t.failed||!resultUrls.length){aiImages.push(t.fallback);aiFail++;continue;}
+  const activeIdx=activeTasks.indexOf(t);
+  const url=activeIdx>=0?resultUrls[activeIdx]:null;
+  if(url){
+   try{
+    const b64=await fetchImageAsBase64(url);
+    aiImages.push(b64);aiOk++;
+   }catch(e){
+    console.warn(`Download "${t.title}" failed:`,e.message);
+    aiImages.push(t.fallback);aiFail++;
+   }
+  }else{aiImages.push(t.fallback);aiFail++;}
  }
+ onStatus?.(`📊 Hasil: ${aiOk} slide AI, ${aiFail} fallback. Menyusun PPT...`);
 
  // Step 3: Build PPT with AI images
  onStatus?.('Menyusun file PPT...');
