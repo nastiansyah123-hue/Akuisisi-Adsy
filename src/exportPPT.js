@@ -28,9 +28,15 @@ const SLIDE_PROMPTS={
  'Detail Advertiser':`Redesign this data table slide into an elegant, well-structured table layout. Keep ALL numbers, names, and values exactly as shown — do not change any data. Use alternating row colors with very subtle teal tint. The header row should be dark teal with white text. Add clean borders and good spacing. Make the typography crisp and easy to read. It should look like a premium financial report table. 16:9 widescreen.`,
  'Performa CS':`Redesign this horizontal bar chart and ranking slide into a polished team performance visualization. Keep ALL names, numbers, and values exactly as shown — do not change any data. Use colorful gradient bars with rounded edges. The CS ranking section should have clean numbered badges. Add subtle background patterns. Make it look like a gamified leaderboard from a modern SaaS platform. 16:9 widescreen.`,
  'Kontribusi Produk':`Redesign this donut chart and product breakdown slide into a stunning product portfolio visualization. Keep ALL product names, numbers, and percentages exactly as shown — do not change any data. Make the donut chart have subtle 3D depth with clean segment separations. The legend should be well-organized with colored dots. Use a clean white background with soft shadows. Make it look like an Apple keynote product slide. 16:9 widescreen.`,
+ 'Tren Harian':`Redesign this daily trend chart into a beautiful, modern time-series visualization. Keep ALL numbers, dates, and data exactly as shown — do not change any values. Make the bar chart have gradient fills and the line chart smooth with glowing dots. Use a clean white background with subtle grid lines. The legend should be minimal and elegant. Make it look like a Bloomberg terminal chart redesigned by Apple. 16:9 widescreen.`,
+ 'Perbandingan Channel':`Redesign this channel comparison slide into elegant side-by-side comparison cards. Keep ALL numbers and labels exactly as shown — do not change any data. Each channel card should have a distinct color accent, clean metric layout with clear hierarchy. Add subtle shadows and rounded corners. Make it look like a premium A/B test results dashboard. 16:9 widescreen.`,
+ 'Perbandingan Platform':`Redesign this platform comparison slide into beautiful branded comparison cards. Keep ALL numbers and labels exactly as shown — do not change any data. Use each platform's brand color (Meta blue, Google green). Clean card layout with clear metric hierarchy. Add subtle platform logos or icons. Make it feel like a cross-platform advertising analytics report. 16:9 widescreen.`,
+ 'Highlight Hari Terbaik':`Redesign this best days highlight slide into an engaging infographic with ranking cards. Keep ALL dates, numbers, and values exactly as shown — do not change any data. Use trophy/medal icons for rankings, color-coded sections (green for best, orange for worst). Each section should feel like an achievement card. Clean, modern layout with subtle shadows. 16:9 widescreen.`,
 };
+const BREAKDOWN_PROMPT=`Redesign this product breakdown slide into a clean, professional two-column comparison layout. Keep ALL names, numbers, and values exactly as shown — do not change any data. Left side shows Advertiser contributors, right side shows CS contributors. Use clean table styling with colored indicator dots, alternating row backgrounds, and a prominent product title. The design should feel like a detailed portfolio analysis from a top consulting firm. 16:9 widescreen.`;
 
 function slidePrompt(title){
+ if(title.startsWith('Breakdown:'))return BREAKDOWN_PROMPT;
  return SLIDE_PROMPTS[title]||`Redesign this slide into a professional, modern PowerPoint presentation slide. Keep ALL text and numbers exactly as shown. Use dark teal (#073b56) as primary color. Clean, corporate design. 16:9 widescreen format.`;
 }
 
@@ -264,6 +270,225 @@ function renderProductCanvas(rows){
  return canvasToBase64(canvas);
 }
 
+// ── 1. Tren Harian ──
+function renderDailyTrendCanvas(groups,period){
+ const{canvas,ctx,w,h}=createCanvas(960,540);
+ ctx.fillStyle=B.white;ctx.fillRect(0,0,w,h);
+ ctx.fillStyle=B.mid;ctx.fillRect(0,0,w,5);
+ ctx.fillStyle=B.dark;ctx.font='bold 24px Arial';ctx.fillText('Tren Harian',50,50);
+ ctx.fillStyle=B.accent;ctx.font='12px Arial';ctx.fillText(period,50,72);
+ // aggregate by date
+ const byDate={};
+ for(const g of groups){
+  if(!byDate[g.date])byDate[g.date]={date:g.date,revenue:0,leads:0,closing:0};
+  const d=byDate[g.date];d.revenue+=g.revenue;d.leads+=g.leads;d.closing+=g.closing;
+ }
+ const dates=Object.values(byDate).sort((a,b)=>a.date.localeCompare(b.date));
+ if(!dates.length){ctx.fillStyle=B.accent;ctx.font='13px Arial';ctx.fillText('Tidak ada data',50,200);return canvasToBase64(canvas);}
+ const maxRev=Math.max(...dates.map(d=>d.revenue),1);
+ const maxLeads=Math.max(...dates.map(d=>d.leads),1);
+ const pad={top:100,bottom:80,left:70,right:50};
+ const chartW=w-pad.left-pad.right,chartH=h-pad.top-pad.bottom;
+ // grid
+ ctx.strokeStyle='#e8eef2';ctx.lineWidth=0.5;
+ for(let i=0;i<=4;i++){const y=pad.top+chartH*(1-i/4);ctx.beginPath();ctx.moveTo(pad.left,y);ctx.lineTo(w-pad.right,y);ctx.stroke();
+  ctx.fillStyle=B.accent;ctx.font='9px Arial';ctx.textAlign='right';ctx.fillText(moneyShort(maxRev*i/4),pad.left-8,y+4);ctx.textAlign='left';
+ }
+ const gap=chartW/dates.length;
+ const barW=Math.min(40,gap*0.55);
+ // bars (revenue)
+ dates.forEach((d,i)=>{
+  const x=pad.left+i*gap+(gap-barW)/2;
+  const barH=(d.revenue/maxRev)*chartH;
+  const y=pad.top+chartH-barH;
+  const grad=ctx.createLinearGradient(x,y,x,y+barH);
+  grad.addColorStop(0,B.mid);grad.addColorStop(1,'#0d9488');
+  ctx.fillStyle=grad;roundRect(ctx,x,y,barW,barH,3);ctx.fill();
+  // value on top
+  if(dates.length<=15){ctx.fillStyle=B.dark;ctx.font='bold 8px Arial';ctx.textAlign='center';ctx.fillText(moneyShort(d.revenue),x+barW/2,y-6);}
+  // date label
+  ctx.fillStyle=B.accent;ctx.font='8px Arial';ctx.textAlign='center';
+  const lbl=d.date.slice(8);// just day
+  ctx.fillText(lbl,x+barW/2,h-pad.bottom+16);
+  ctx.textAlign='left';
+ });
+ // line (leads) overlay
+ ctx.strokeStyle='#d97706';ctx.lineWidth=2;ctx.beginPath();
+ dates.forEach((d,i)=>{
+  const x=pad.left+i*gap+gap/2;
+  const y=pad.top+chartH-(d.leads/maxLeads)*chartH;
+  if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+ });
+ ctx.stroke();
+ // dots
+ dates.forEach((d,i)=>{
+  const x=pad.left+i*gap+gap/2;
+  const y=pad.top+chartH-(d.leads/maxLeads)*chartH;
+  ctx.fillStyle='#d97706';ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fill();
+ });
+ // legend
+ ctx.fillStyle=B.mid;roundRect(ctx,pad.left,h-35,10,10,2);ctx.fill();
+ ctx.fillStyle=B.dark;ctx.font='10px Arial';ctx.fillText('Omzet',pad.left+16,h-26);
+ ctx.fillStyle='#d97706';roundRect(ctx,pad.left+80,h-35,10,10,2);ctx.fill();
+ ctx.fillStyle=B.dark;ctx.fillText('Leads',pad.left+96,h-26);
+ // summary
+ const totalRev=dates.reduce((s,d)=>s+d.revenue,0);
+ const avgRev=totalRev/dates.length;
+ ctx.fillStyle=B.accent;ctx.font='10px Arial';
+ ctx.fillText(`Rata-rata harian: ${money(avgRev)}  ·  ${dates.length} hari`,pad.left+180,h-26);
+ return canvasToBase64(canvas);
+}
+
+// ── 2. Perbandingan Channel ──
+function renderChannelCompareCanvas(groups,period){
+ const{canvas,ctx,w,h}=createCanvas(960,540);
+ ctx.fillStyle=B.white;ctx.fillRect(0,0,w,h);
+ ctx.fillStyle=B.mid;ctx.fillRect(0,0,w,5);
+ ctx.fillStyle=B.dark;ctx.font='bold 24px Arial';ctx.fillText('Perbandingan Channel',50,50);
+ ctx.fillStyle=B.accent;ctx.font='12px Arial';ctx.fillText(period,50,72);
+ // aggregate by channel
+ const byCh={};
+ for(const g of groups){
+  const ch=g.channel||'Lainnya';
+  if(!byCh[ch])byCh[ch]={channel:ch,leads:0,closing:0,units:0,revenue:0,spend:0};
+  const c=byCh[ch];c.leads+=g.leads;c.closing+=g.closing;c.units+=g.units;c.revenue+=g.revenue;c.spend+=g.spend;
+ }
+ const channels=Object.values(byCh).sort((a,b)=>b.revenue-a.revenue);
+ const totalRev=channels.reduce((s,c)=>s+c.revenue,0);
+ if(!channels.length){ctx.fillStyle=B.accent;ctx.font='13px Arial';ctx.fillText('Tidak ada data',50,200);return canvasToBase64(canvas);}
+ // cards layout
+ const cardW=Math.min(380,(w-120)/channels.length);
+ const startX=(w-channels.length*cardW-(channels.length-1)*20)/2;
+ channels.forEach((ch,i)=>{
+  const x=startX+i*(cardW+20),y=110;
+  const cr=ch.leads?ch.closing/ch.leads:0;
+  const share=totalRev?ch.revenue/totalRev:0;
+  // card bg
+  ctx.fillStyle='#f8fafb';roundRect(ctx,x,y,cardW,350,10);ctx.fill();
+  ctx.strokeStyle='#e8eef2';ctx.lineWidth=1;roundRect(ctx,x,y,cardW,350,10);ctx.stroke();
+  // top accent
+  ctx.fillStyle=COLORS[i%COLORS.length];ctx.fillRect(x,y,cardW,5);
+  // channel name
+  ctx.fillStyle=B.dark;ctx.font='bold 18px Arial';ctx.textAlign='center';ctx.fillText(ch.channel,x+cardW/2,y+40);
+  // share badge
+  ctx.fillStyle=COLORS[i%COLORS.length];roundRect(ctx,x+cardW/2-30,y+50,60,22,11);ctx.fill();
+  ctx.fillStyle=B.white;ctx.font='bold 11px Arial';ctx.fillText(pct(share),x+cardW/2,y+65);
+  // metrics
+  const metrics=[
+   {label:'Omzet',value:money(ch.revenue)},
+   {label:'Leads',value:num(ch.leads)},
+   {label:'Closing',value:num(ch.closing)},
+   {label:'Closing Rate',value:pct(cr)},
+   {label:'Unit',value:num(ch.units)},
+  ];
+  metrics.forEach((m,mi)=>{
+   const my=y+95+mi*48;
+   ctx.fillStyle=B.accent;ctx.font='10px Arial';ctx.textAlign='center';ctx.fillText(m.label,x+cardW/2,my);
+   ctx.fillStyle=B.dark;ctx.font='bold 16px Arial';ctx.fillText(m.value,x+cardW/2,my+20);
+  });
+  ctx.textAlign='left';
+ });
+ return canvasToBase64(canvas);
+}
+
+// ── 3. Perbandingan Platform ──
+function renderPlatformCompareCanvas(groups,period){
+ const{canvas,ctx,w,h}=createCanvas(960,540);
+ ctx.fillStyle=B.white;ctx.fillRect(0,0,w,h);
+ ctx.fillStyle=B.mid;ctx.fillRect(0,0,w,5);
+ ctx.fillStyle=B.dark;ctx.font='bold 24px Arial';ctx.fillText('Perbandingan Platform',50,50);
+ ctx.fillStyle=B.accent;ctx.font='12px Arial';ctx.fillText(period,50,72);
+ const byPlat={};
+ for(const g of groups){
+  const pl=g.platform||'Meta';
+  if(!byPlat[pl])byPlat[pl]={platform:pl,leads:0,closing:0,units:0,revenue:0,spend:0};
+  const p=byPlat[pl];p.leads+=g.leads;p.closing+=g.closing;p.units+=g.units;p.revenue+=g.revenue;p.spend+=g.spend;
+ }
+ const platforms=Object.values(byPlat).sort((a,b)=>b.revenue-a.revenue);
+ const totalRev=platforms.reduce((s,p)=>s+p.revenue,0);
+ if(!platforms.length){ctx.fillStyle=B.accent;ctx.font='13px Arial';ctx.fillText('Tidak ada data',50,200);return canvasToBase64(canvas);}
+ const cardW=Math.min(380,(w-120)/platforms.length);
+ const startX=(w-platforms.length*cardW-(platforms.length-1)*20)/2;
+ const platColors={'Meta':'#1877F2','Google':'#34A853','TikTok':'#010101'};
+ platforms.forEach((pl,i)=>{
+  const x=startX+i*(cardW+20),y=110;
+  const cr=pl.leads?pl.closing/pl.leads:0;
+  const share=totalRev?pl.revenue/totalRev:0;
+  ctx.fillStyle='#f8fafb';roundRect(ctx,x,y,cardW,350,10);ctx.fill();
+  ctx.strokeStyle='#e8eef2';ctx.lineWidth=1;roundRect(ctx,x,y,cardW,350,10);ctx.stroke();
+  ctx.fillStyle=platColors[pl.platform]||COLORS[i%COLORS.length];ctx.fillRect(x,y,cardW,5);
+  ctx.fillStyle=B.dark;ctx.font='bold 18px Arial';ctx.textAlign='center';ctx.fillText(pl.platform,x+cardW/2,y+40);
+  const accent=platColors[pl.platform]||COLORS[i%COLORS.length];
+  ctx.fillStyle=accent;roundRect(ctx,x+cardW/2-30,y+50,60,22,11);ctx.fill();
+  ctx.fillStyle=B.white;ctx.font='bold 11px Arial';ctx.fillText(pct(share),x+cardW/2,y+65);
+  const metrics=[
+   {label:'Omzet',value:money(pl.revenue)},
+   {label:'Leads',value:num(pl.leads)},
+   {label:'Closing',value:num(pl.closing)},
+   {label:'Closing Rate',value:pct(cr)},
+   {label:'Biaya Iklan',value:money(pl.spend)},
+  ];
+  metrics.forEach((m,mi)=>{
+   const my=y+95+mi*48;
+   ctx.fillStyle=B.accent;ctx.font='10px Arial';ctx.textAlign='center';ctx.fillText(m.label,x+cardW/2,my);
+   ctx.fillStyle=B.dark;ctx.font='bold 16px Arial';ctx.fillText(m.value,x+cardW/2,my+20);
+  });
+  ctx.textAlign='left';
+ });
+ return canvasToBase64(canvas);
+}
+
+// ── 5. Highlight Hari Terbaik ──
+function renderBestDaysCanvas(groups,period){
+ const{canvas,ctx,w,h}=createCanvas(960,540);
+ ctx.fillStyle=B.white;ctx.fillRect(0,0,w,h);
+ ctx.fillStyle=B.mid;ctx.fillRect(0,0,w,5);
+ ctx.fillStyle=B.dark;ctx.font='bold 24px Arial';ctx.fillText('Highlight Hari Terbaik',50,50);
+ ctx.fillStyle=B.accent;ctx.font='12px Arial';ctx.fillText(period,50,72);
+ const byDate={};
+ for(const g of groups){
+  if(!byDate[g.date])byDate[g.date]={date:g.date,revenue:0,leads:0,closing:0,units:0};
+  const d=byDate[g.date];d.revenue+=g.revenue;d.leads+=g.leads;d.closing+=g.closing;d.units+=g.units;
+ }
+ const dates=Object.values(byDate);
+ if(!dates.length){ctx.fillStyle=B.accent;ctx.font='13px Arial';ctx.fillText('Tidak ada data',50,200);return canvasToBase64(canvas);}
+ const fmtDate=d=>{const p=d.split('-');return `${p[2]}/${p[1]}/${p[0]}`;};
+ const topRevenue=[...dates].sort((a,b)=>b.revenue-a.revenue).slice(0,3);
+ const topLeads=[...dates].sort((a,b)=>b.leads-a.leads).slice(0,3);
+ const topClosing=[...dates].sort((a,b)=>b.closing-a.closing).slice(0,3);
+ const worstRevenue=[...dates].sort((a,b)=>a.revenue-b.revenue).slice(0,3);
+ // Layout: 2x2 grid
+ const sections=[
+  {title:'🏆 Omzet Tertinggi',items:topRevenue.map((d,i)=>({rank:i+1,date:fmtDate(d.date),main:money(d.revenue),sub:`${num(d.leads)} leads · ${num(d.closing)} closing`})),color:B.green},
+  {title:'📊 Leads Terbanyak',items:topLeads.map((d,i)=>({rank:i+1,date:fmtDate(d.date),main:num(d.leads)+' leads',sub:`${num(d.closing)} closing · ${money(d.revenue)}`})),color:B.blue},
+  {title:'✅ Closing Terbanyak',items:topClosing.map((d,i)=>({rank:i+1,date:fmtDate(d.date),main:num(d.closing)+' closing',sub:`CR ${pct(d.leads?d.closing/d.leads:0)} · ${money(d.revenue)}`})),color:'#8b5cf6'},
+  {title:'⚠️ Omzet Terendah',items:worstRevenue.map((d,i)=>({rank:i+1,date:fmtDate(d.date),main:money(d.revenue),sub:`${num(d.leads)} leads · ${num(d.closing)} closing`})),color:'#d97706'},
+ ];
+ sections.forEach((sec,si)=>{
+  const col=si%2,row=Math.floor(si/2);
+  const bx=50+col*450,by=100+row*210;
+  // section bg
+  ctx.fillStyle='#f8fafb';roundRect(ctx,bx,by,420,190,8);ctx.fill();
+  ctx.fillStyle=sec.color;ctx.fillRect(bx,by,420,4);
+  // title
+  ctx.fillStyle=B.dark;ctx.font='bold 14px Arial';ctx.fillText(sec.title,bx+14,by+28);
+  // items
+  sec.items.forEach((item,ii)=>{
+   const iy=by+48+ii*46;
+   // rank badge
+   ctx.fillStyle=sec.color;roundRect(ctx,bx+14,iy,24,24,12);ctx.fill();
+   ctx.fillStyle=B.white;ctx.font='bold 11px Arial';ctx.textAlign='center';ctx.fillText(item.rank,bx+26,iy+16);ctx.textAlign='left';
+   // date
+   ctx.fillStyle=B.accent;ctx.font='10px Arial';ctx.fillText(item.date,bx+48,iy+10);
+   // main value
+   ctx.fillStyle=B.dark;ctx.font='bold 13px Arial';ctx.fillText(item.main,bx+130,iy+10);
+   // sub
+   ctx.fillStyle=B.accent;ctx.font='9px Arial';ctx.fillText(item.sub,bx+48,iy+24);
+  });
+ });
+ return canvasToBase64(canvas);
+}
+
 // ── Insights / Evaluasi ──
 function generateInsights(groups,filtered,advRows,csRows,prodRows,total,hideSpend){
  const findings=[];
@@ -386,6 +611,99 @@ function aggregateCS(reports){
  return Object.values(byCS).sort((a,b)=>b.revenue-a.revenue);
 }
 
+function aggregateProductBreakdown(groups,filtered){
+ const byProd={};
+ // advertiser per product (from groups/ads)
+ for(const g of groups){
+  if(!byProd[g.product])byProd[g.product]={product:g.product,revenue:0,leads:0,closing:0,advertisers:{},csMap:{}};
+  const p=byProd[g.product];
+  p.revenue+=g.revenue;p.leads+=g.leads;p.closing+=g.closing;
+  if(!p.advertisers[g.advertiser])p.advertisers[g.advertiser]={name:g.advertiser,revenue:0,spend:0,leads:0,closing:0};
+  const a=p.advertisers[g.advertiser];a.revenue+=g.revenue;a.spend+=g.spend;a.leads+=g.leads;a.closing+=g.closing;
+ }
+ // CS per product (from filtered reports)
+ for(const r of filtered){
+  const pk=r.product;
+  if(!byProd[pk])byProd[pk]={product:pk,revenue:0,leads:0,closing:0,advertisers:{},csMap:{}};
+  const p=byProd[pk];
+  const cs=r.cs;
+  if(!p.csMap[cs])p.csMap[cs]={name:cs,revenue:0,leads:0,closing:0,units:0};
+  const c=p.csMap[cs];
+  c.revenue+=Number(r.revenue);c.leads+=Number(r.leads);c.closing+=Number(r.closing)-Number(r.invalid);c.units+=Number(r.units)-Number(r.invalidUnits);
+ }
+ return Object.values(byProd).sort((a,b)=>b.revenue-a.revenue).map(p=>({
+  ...p,
+  advList:Object.values(p.advertisers).sort((a,b)=>b.revenue-a.revenue),
+  csList:Object.values(p.csMap).sort((a,b)=>b.revenue-a.revenue),
+ }));
+}
+
+function renderProductBreakdownCanvases(breakdowns,period){
+ const canvases=[];
+ for(const prod of breakdowns){
+  const advCount=prod.advList.length;
+  const csCount=prod.csList.length;
+  const maxRows=Math.max(advCount,csCount,1);
+  const h=Math.max(540,130+maxRows*28+20);
+  const{canvas,ctx,w}=createCanvas(960,h);
+  ctx.fillStyle=B.white;ctx.fillRect(0,0,w,h);
+  ctx.fillStyle=B.mid;ctx.fillRect(0,0,w,5);
+  // title
+  ctx.fillStyle=B.dark;ctx.font='bold 22px Arial';ctx.fillText(prod.product,50,45);
+  ctx.fillStyle=B.accent;ctx.font='12px Arial';
+  const cr=prod.leads?prod.closing/prod.leads:0;
+  ctx.fillText(`Omzet ${money(prod.revenue)}  ·  ${num(prod.leads)} leads  ·  ${num(prod.closing)} closing  ·  CR ${pct(cr)}`,50,68);
+  // Two columns: Advertiser (left) | CS (right)
+  const colW=430,leftX=30,rightX=490,startY=95,rowH=28,headerH=30;
+  // ── Left: Advertiser ──
+  ctx.fillStyle=B.dark;roundRect(ctx,leftX,startY,colW,headerH,4);ctx.fill();
+  ctx.fillStyle=B.white;ctx.font='bold 10px Arial';
+  ctx.fillText('Advertiser',leftX+12,startY+19);
+  ctx.textAlign='center';ctx.fillText('Omzet',leftX+260,startY+19);ctx.fillText('Leads',leftX+340,startY+19);ctx.fillText('CR',leftX+400,startY+19);
+  ctx.textAlign='left';
+  prod.advList.forEach((a,i)=>{
+   const y=startY+headerH+i*rowH;
+   ctx.fillStyle=i%2===0?'#f8fafb':B.white;ctx.fillRect(leftX,y,colW,rowH);
+   ctx.fillStyle=COLORS[i%COLORS.length];roundRect(ctx,leftX+8,y+8,12,12,3);ctx.fill();
+   ctx.fillStyle=B.dark;ctx.font='11px Arial';
+   const label=a.name.length>18?a.name.slice(0,17)+'…':a.name;
+   ctx.fillText(label,leftX+28,y+18);
+   ctx.font='bold 10px Arial';ctx.textAlign='center';
+   ctx.fillText(moneyShort(a.revenue),leftX+260,y+18);
+   ctx.font='10px Arial';
+   ctx.fillText(num(a.leads),leftX+340,y+18);
+   ctx.fillText(pct(a.leads?a.closing/a.leads:0),leftX+400,y+18);
+   ctx.textAlign='left';
+  });
+  if(!advCount){ctx.fillStyle=B.accent;ctx.font='11px Arial';ctx.fillText('Tidak ada data advertiser',leftX+12,startY+headerH+18);}
+  // ── Right: CS ──
+  ctx.fillStyle=B.dark;roundRect(ctx,rightX,startY,colW,headerH,4);ctx.fill();
+  ctx.fillStyle=B.white;ctx.font='bold 10px Arial';
+  ctx.fillText('Customer Service',rightX+12,startY+19);
+  ctx.textAlign='center';ctx.fillText('Omzet',rightX+230,startY+19);ctx.fillText('Leads',rightX+310,startY+19);ctx.fillText('CR',rightX+360,startY+19);ctx.fillText('Upsell',rightX+410,startY+19);
+  ctx.textAlign='left';
+  prod.csList.forEach((c,i)=>{
+   const y=startY+headerH+i*rowH;
+   ctx.fillStyle=i%2===0?'#f8fafb':B.white;ctx.fillRect(rightX,y,colW,rowH);
+   ctx.fillStyle=COLORS[(i+3)%COLORS.length];roundRect(ctx,rightX+8,y+8,12,12,3);ctx.fill();
+   ctx.fillStyle=B.dark;ctx.font='11px Arial';
+   const label=c.name.length>18?c.name.slice(0,17)+'…':c.name;
+   ctx.fillText(label,rightX+28,y+18);
+   ctx.font='bold 10px Arial';ctx.textAlign='center';
+   ctx.fillText(moneyShort(c.revenue),rightX+230,y+18);
+   ctx.font='10px Arial';
+   ctx.fillText(num(c.leads),rightX+310,y+18);
+   ctx.fillText(pct(c.leads?c.closing/c.leads:0),rightX+360,y+18);
+   const upsell=c.closing>0?(c.units/c.closing):0;
+   ctx.fillText(upsell?upsell.toFixed(2)+'×':'—',rightX+410,y+18);
+   ctx.textAlign='left';
+  });
+  if(!csCount){ctx.fillStyle=B.accent;ctx.font='11px Arial';ctx.fillText('Tidak ada data CS',rightX+12,startY+headerH+18);}
+  canvases.push({title:`Breakdown: ${prod.product}`,base64:canvasToBase64(canvas)});
+ }
+ return canvases;
+}
+
 function aggregateProducts(groups){
  const byProd={};
  for(const g of groups){
@@ -402,18 +720,25 @@ export async function exportPPT({groups,filtered,total,kpis,hideSpend,period,onS
  const advRows=aggregateAdv(groups);
  const csRows=aggregateCS(filtered);
  const prodRows=aggregateProducts(groups);
+ const prodBreakdowns=aggregateProductBreakdown(groups,filtered);
 
  // Step 1: Render all slides to canvas
  onStatus?.('Menyiapkan slide...');
  const findings=generateInsights(groups,filtered,advRows,csRows,prodRows,total,hideSpend);
+ const breakdownSlides=renderProductBreakdownCanvases(prodBreakdowns,period);
  const slides=[
   {title:'Cover',base64:renderCoverCanvas(period)},
   {title:'Ringkasan Performa',base64:renderSummaryCanvas(total,kpis,hideSpend,period)},
   {title:'Temuan & Evaluasi',base64:renderInsightsCanvas(findings,period)},
+  {title:'Tren Harian',base64:renderDailyTrendCanvas(groups,period)},
+  {title:'Highlight Hari Terbaik',base64:renderBestDaysCanvas(groups,period)},
+  {title:'Perbandingan Channel',base64:renderChannelCompareCanvas(groups,period)},
+  {title:'Perbandingan Platform',base64:renderPlatformCompareCanvas(groups,period)},
   {title:'Performa Advertiser',base64:renderAdvBarCanvas(advRows)},
   {title:'Detail Advertiser',base64:renderAdvTableCanvas(advRows,hideSpend)},
   {title:'Performa CS',base64:renderCSCanvas(csRows)},
   {title:'Kontribusi Produk',base64:renderProductCanvas(prodRows)},
+  ...breakdownSlides,
  ];
 
  // Step 2: Submit ALL tasks in parallel
