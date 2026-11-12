@@ -1,5 +1,5 @@
 import React,{useState,useMemo}from'react';
-import{AlertTriangle,CheckCircle2,Zap,Loader,ChevronDown,ChevronUp,Settings,Save}from'lucide-react';
+import{AlertTriangle,CheckCircle2,Zap,Loader,ChevronDown,ChevronUp}from'lucide-react';
 const money=n=>new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n||0);
 const num=n=>new Intl.NumberFormat('id-ID').format(n||0);
 const pct=n=>`${(n*100).toFixed(1)}%`;
@@ -191,52 +191,6 @@ function renderMarkdown(text){
  }).filter(Boolean);
 }
 
-function KpiSettings({catalog,kpiTargets,onSave}){
- const products=catalog.map(c=>c.name).sort();
- const[edits,setEdits]=useState(()=>{
-  const map={};
-  for(const p of products){
-   const existing=kpiTargets.find(k=>k.product===p);
-   map[p]=existing?{...existing}:{product:p,...DEFAULT_KPI};
-  }
-  return map;
- });
- const[saving,setSaving]=useState(null);
-
- const update=(product,field,value)=>{
-  setEdits(prev=>({...prev,[product]:{...prev[product],[field]:value}}));
- };
-
- const save=async(product)=>{
-  setSaving(product);
-  const row=edits[product];
-  const existing=kpiTargets.find(k=>k.product===product);
-  await onSave({...row,id:existing?.id||undefined,product,updated_at:new Date().toISOString()});
-  setSaving(null);
- };
-
- return <div className="kpi-settings">
-  <div className="table-wrap"><table className="kpi-table">
-   <thead><tr>
-    <th>Produk</th><th>CAQ Max</th><th>CAC Max</th><th>CPL Max</th><th>CR Min (Adv)</th><th>CR Min (CS)</th><th>Upsell Min</th><th></th>
-   </tr></thead>
-   <tbody>{products.map(p=>{
-    const r=edits[p]||{...DEFAULT_KPI};
-    return <tr key={p}>
-     <td><strong>{p}</strong></td>
-     <td><input type="number" step="0.01" min="0" max="1" value={r.max_caq} onChange={e=>update(p,'max_caq',+e.target.value)}/><small>{pct(r.max_caq)}</small></td>
-     <td><input type="number" step="1000" min="0" value={r.max_cac} onChange={e=>update(p,'max_cac',+e.target.value)}/><small>{money(r.max_cac)}</small></td>
-     <td><input type="number" step="1000" min="0" value={r.max_cpl} onChange={e=>update(p,'max_cpl',+e.target.value)}/><small>{money(r.max_cpl)}</small></td>
-     <td><input type="number" step="0.01" min="0" max="1" value={r.min_cr} onChange={e=>update(p,'min_cr',+e.target.value)}/><small>{pct(r.min_cr)}</small></td>
-     <td><input type="number" step="0.01" min="0" max="1" value={r.min_cr_cs} onChange={e=>update(p,'min_cr_cs',+e.target.value)}/><small>{pct(r.min_cr_cs)}</small></td>
-     <td><input type="number" step="0.1" min="0" value={r.min_upsell} onChange={e=>update(p,'min_upsell',+e.target.value)}/><small>{r.min_upsell}×</small></td>
-     <td><button className="button" onClick={()=>save(p)} disabled={saving===p}>{saving===p?<Loader size={13} className="spin"/>:<Save size={13}/>}</button></td>
-    </tr>;
-   })}</tbody>
-  </table></div>
- </div>;
-}
-
 function Card({analysis,type,hideSpend,aiSummary}){
  const[expanded,setExpanded]=useState(false);
  const bg={danger:'#fbefeb',warning:'#fef8eb',success:'#ebf7f0',neutral:'#f4f9fc'};
@@ -272,11 +226,10 @@ function Card({analysis,type,hideSpend,aiSummary}){
  </div>;
 }
 
-export default function Evaluation({reports,ads,leadReports,corrections,kpiTargets,catalog,period,hideSpend,role,onSaveKpi}){
+export default function Evaluation({reports,ads,leadReports,corrections,kpiTargets,catalog,period,hideSpend,role}){
  const[tab,setTab]=useState('advertiser');
  const[aiTexts,setAiTexts]=useState({});
  const[aiLoading,setAiLoading]=useState(false);
- const[showKpi,setShowKpi]=useState(false);
  const aiKey=import.meta.env.VITE_CLAUDE_API_KEY||'';
 
  const {curGroups,prevGroups}=useMemo(()=>{
@@ -436,14 +389,11 @@ export default function Evaluation({reports,ads,leadReports,corrections,kpiTarge
     <button className={tab==='cs'?'active':''} onClick={()=>setTab('cs')}>CS ({analyses.length})</button>
    </div>
    <div className="eval-actions">
-    {role==='admin'&&<button className={`button ${showKpi?'primary':''}`} onClick={()=>setShowKpi(!showKpi)}><Settings size={15}/>{showKpi?'Tutup KPI':'Atur KPI'}</button>}
     {aiKey&&<button className="button primary" onClick={generateAll} disabled={aiLoading}>
      {aiLoading?<><Loader size={15} className="spin"/>Menganalisis...</>:<><Zap size={15}/>Ringkasan AI</>}
     </button>}
    </div>
   </div>
-
-  {showKpi&&role==='admin'&&<KpiSettings catalog={catalog||[]} kpiTargets={kpiTargets||[]} onSave={onSaveKpi}/>}
 
   <div className="eval-cards">
    {analyses.map(a=><Card key={a.name} analysis={a} type={tab} hideSpend={hideSpend}
