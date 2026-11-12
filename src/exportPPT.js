@@ -174,13 +174,13 @@ function renderAdvBarCanvas(rows){
 
 function renderAdvTableCanvas(rows,hideSpend){
  const rowH=28,headerH=32;
- const cols=hideSpend?['Advertiser','Leads','Closing','CR','Omzet']:['Advertiser','Leads','Closing','CR','Biaya Iklan','Omzet','CAC','CAQ'];
+ const cols=hideSpend?['Advertiser','Leads','Closing','Omzet','CAQ']:['Advertiser','Leads','Closing','Biaya Iklan','Omzet','CAQ'];
  const totalH=Math.min(100+headerH+rows.length*rowH,540);
  const{canvas,ctx,w,h}=createCanvas(960,totalH);
  ctx.fillStyle=B.white;ctx.fillRect(0,0,w,h);
  ctx.fillStyle=B.mid;ctx.fillRect(0,0,w,5);
  ctx.fillStyle=B.dark;ctx.font='bold 24px Arial';ctx.fillText('Detail Advertiser',50,50);
- const colW=hideSpend?[240,100,100,90,200]:[200,85,85,75,120,120,100,100];
+ const colW=hideSpend?[260,120,120,200,120]:[220,110,110,140,180,120];
  const startY=80;let cx=40;
  // header
  ctx.fillStyle=B.dark;roundRect(ctx,30,startY,w-60,headerH,4);ctx.fill();
@@ -191,8 +191,8 @@ function renderAdvTableCanvas(rows,hideSpend){
   const y=startY+headerH+ri*rowH;
   if(y+rowH>h)return;
   ctx.fillStyle=ri%2===0?B.white:'#f8fafb';ctx.fillRect(30,y,w-60,rowH);
-  const cr=r.leads?r.closing/r.leads:0;
-  const vals=hideSpend?[r.advertiser,num(r.leads),num(r.closing),pct(cr),money(r.revenue)]:[r.advertiser,num(r.leads),num(r.closing),pct(cr),money(r.spend),money(r.revenue),r.closing&&r.spend?money(r.spend/r.closing):'—',r.revenue&&r.spend?pct(r.spend/r.revenue):'—'];
+  const caq=r.revenue&&r.spend?pct(r.spend/r.revenue):'—';
+  const vals=hideSpend?[r.advertiser,num(r.leads),num(r.closing),money(r.revenue),caq]:[r.advertiser,num(r.leads),num(r.closing),money(r.spend),money(r.revenue),caq];
   cx=40;
   vals.forEach((v,i)=>{ctx.fillStyle=B.dark;ctx.font='10px Arial';ctx.textAlign=i===0?'left':'center';ctx.fillText(String(v),i===0?cx:cx+colW[i]/2,y+18);cx+=colW[i];});
  });
@@ -659,7 +659,7 @@ function renderProductBreakdownCanvases(breakdowns,period){
   ctx.fillStyle=B.dark;roundRect(ctx,leftX,startY,colW,headerH,4);ctx.fill();
   ctx.fillStyle=B.white;ctx.font='bold 10px Arial';
   ctx.fillText('Advertiser',leftX+12,startY+19);
-  ctx.textAlign='center';ctx.fillText('Omzet',leftX+260,startY+19);ctx.fillText('Leads',leftX+340,startY+19);ctx.fillText('CR',leftX+400,startY+19);
+  ctx.textAlign='center';ctx.fillText('Omzet',leftX+260,startY+19);ctx.fillText('Leads',leftX+340,startY+19);ctx.fillText('CAQ',leftX+400,startY+19);
   ctx.textAlign='left';
   prod.advList.forEach((a,i)=>{
    const y=startY+headerH+i*rowH;
@@ -672,7 +672,7 @@ function renderProductBreakdownCanvases(breakdowns,period){
    ctx.fillText(moneyShort(a.revenue),leftX+260,y+18);
    ctx.font='10px Arial';
    ctx.fillText(num(a.leads),leftX+340,y+18);
-   ctx.fillText(pct(a.leads?a.closing/a.leads:0),leftX+400,y+18);
+   ctx.fillText(a.revenue&&a.spend?pct(a.spend/a.revenue):'—',leftX+400,y+18);
    ctx.textAlign='left';
   });
   if(!advCount){ctx.fillStyle=B.accent;ctx.font='11px Arial';ctx.fillText('Tidak ada data advertiser',leftX+12,startY+headerH+18);}
