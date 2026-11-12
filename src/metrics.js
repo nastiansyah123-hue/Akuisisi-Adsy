@@ -1,7 +1,7 @@
-export const key = r => [r.date,r.product,r.advertiser,r.channel].join('|');
+export const key = r => [r.date,r.product,r.advertiser,r.channel,r.platform||'Meta'].join('|');
 export function summarize(reports, ads) {
  const map = new Map();
- const get = r => { const k=key(r); if(!map.has(k)) map.set(k,{date:r.date,product:r.product,advertiser:r.advertiser,channel:r.channel,leads:0,closing:0,units:0,revenue:0,spend:0,cs:new Set()}); return map.get(k); };
+ const get = r => { const k=key(r); if(!map.has(k)) map.set(k,{date:r.date,product:r.product,advertiser:r.advertiser,channel:r.channel,platform:r.platform||'Meta',leads:0,closing:0,units:0,revenue:0,spend:0,cs:new Set()}); return map.get(k); };
  for(const r of reports){const g=get(r);g.leads+=Number(r.leads);g.closing+=Number(r.closing)-Number(r.invalid);g.units+=Number(r.units)-Number(r.invalidUnits);g.revenue+=Number(r.revenue);g.cs.add(r.cs);}
  for(const a of ads) get(a).spend+=Number(a.budget)*(1+Number(a.tax)/100);
  return [...map.values()].map(g=>({...g,cs:[...g.cs],cr:g.leads?g.closing/g.leads:0,cpl:g.leads?g.spend/g.leads:null,cac:g.closing?g.spend/g.closing:null,roas:g.spend?g.revenue/g.spend:null}));
