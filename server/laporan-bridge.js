@@ -545,29 +545,38 @@ export function createLaporanBridgeHandler() {
               packageLines: report.packageLines
             });
           } else {
-            // Check duplicate date+cs+product+advertiser+channel+platform
+            // Check if report already exists for this date+cs+product+advertiser+channel
             const dup = await db.query('reports', {
               date: `eq.${report.date}`, cs: `eq.${report.cs}`,
               product: `eq.${report.product}`, advertiser: `eq.${report.advertiser}`,
-              channel: `eq.${report.channel}`, platform: `eq.${report.platform || 'Meta'}`,
+              channel: `eq.${report.channel}`,
               select: 'id', limit: '1'
             });
-            if (dup.length) return respond({ error: 'Laporan tanggal dan penugasan ini sudah tersedia.' }, 409);
-
-            await db.insert('reports', {
-              id: report.id,
-              date: report.date,
-              cs: report.cs,
-              product: report.product,
-              advertiser: report.advertiser,
-              channel: report.channel,
-              platform: report.platform || 'Meta',
-              leads,
-              notes: report.notes || '',
-              packageLines: report.packageLines,
-              originalPackageLines: report.originalPackageLines || report.packageLines,
-              originalLeads: report.originalLeads ?? leads
-            });
+            if (dup.length) {
+              // Update existing report instead of rejecting
+              await db.update('reports', dup[0].id, {
+                leads,
+                notes: report.notes || '',
+                packageLines: report.packageLines,
+                platform: report.platform || 'Meta'
+              });
+              report.id = dup[0].id;
+            } else {
+              await db.insert('reports', {
+                id: report.id,
+                date: report.date,
+                cs: report.cs,
+                product: report.product,
+                advertiser: report.advertiser,
+                channel: report.channel,
+                platform: report.platform || 'Meta',
+                leads,
+                notes: report.notes || '',
+                packageLines: report.packageLines,
+                originalPackageLines: report.originalPackageLines || report.packageLines,
+                originalLeads: report.originalLeads ?? leads
+              });
+            }
           }
 
           // Upsert lead report
