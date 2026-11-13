@@ -1,5 +1,6 @@
-import React,{useState,useMemo}from'react';
+import React,{useState,useMemo,useEffect}from'react';
 import{AlertTriangle,CheckCircle2,Zap,Loader,ChevronDown,ChevronUp}from'lucide-react';
+import{supabase,loadAiEvaluations,saveAiEvaluations}from'./db';
 const money=n=>new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n||0);
 const num=n=>new Intl.NumberFormat('id-ID').format(n||0);
 const pct=n=>`${(n*100).toFixed(1)}%`;
@@ -232,6 +233,19 @@ export default function Evaluation({reports,ads,leadReports,corrections,kpiTarge
  const[aiLoading,setAiLoading]=useState(false);
  const aiKey=import.meta.env.VITE_CLAUDE_API_KEY||'';
 
+ // Load cached AI texts from Supabase (or localStorage for demo)
+ useEffect(()=>{
+  if(!period.start||!period.end)return;
+  if(supabase){
+   loadAiEvaluations(period.start,period.end).then(map=>{
+    if(Object.keys(map).length)setAiTexts(map);
+    else setAiTexts({});
+   });
+  }else{
+   try{const saved=localStorage.getItem(`eval-ai-${period.start}-${period.end}`);setAiTexts(saved?JSON.parse(saved):{})}catch{setAiTexts({})}
+  }
+ },[period.start,period.end]);
+
  const {curGroups,prevGroups}=useMemo(()=>{
   const {start,end}=period;
   if(!start||!end)return {curGroups:[],prevGroups:[]};
@@ -371,7 +385,12 @@ export default function Evaluation({reports,ads,leadReports,corrections,kpiTarge
     }
     result[`${tab}-${names[i]}`]=text.slice(start,end).trim();
    }
-   setAiTexts(prev=>({...prev,...result}));
+   setAiTexts(prev=>{
+    const merged={...prev,...result};
+    if(supabase){saveAiEvaluations(period.start,period.end,merged)}
+    else{try{localStorage.setItem(`eval-ai-${period.start}-${period.end}`,JSON.stringify(merged))}catch{}}
+    return merged;
+   });
   }catch(e){console.error('AI error:',e);}
   finally{setAiLoading(false);}
  }

@@ -43,5 +43,25 @@ export async function fetchAdvNames(){
 export async function deleteReport(reportId){const {error}=await supabase.rpc('delete_report',{p_report_id:reportId});if(error)throw error;return loadRemote();}
 export async function deleteAd(adId){const {error}=await supabase.rpc('delete_ad',{p_ad_id:adId});if(error)throw error;return loadRemote();}
 
+export async function loadAiEvaluations(periodStart,periodEnd){
+  if(!supabase)return{};
+  const{data,error}=await supabase.from('ai_evaluations').select('tab,entity_name,ai_text').eq('period_start',periodStart).eq('period_end',periodEnd);
+  if(error||!data)return{};
+  const map={};
+  for(const r of data)map[`${r.tab}-${r.entity_name}`]=r.ai_text;
+  return map;
+}
+
+export async function saveAiEvaluations(periodStart,periodEnd,texts){
+  if(!supabase)return;
+  const rows=Object.entries(texts).map(([key,ai_text])=>{
+    const dash=key.indexOf('-');
+    return{period_start:periodStart,period_end:periodEnd,tab:key.slice(0,dash),entity_name:key.slice(dash+1),ai_text,generated_at:new Date().toISOString()};
+  });
+  if(!rows.length)return;
+  const{error}=await supabase.from('ai_evaluations').upsert(rows,{onConflict:'period_start,period_end,tab,entity_name'});
+  if(error)console.error('Save AI evaluations error:',error);
+}
+
 export async function correctRemote({reportId,packageId,delta,reason,expected}){const {error}=await supabase.rpc('correct_package',{p_report_id:reportId,p_package_id:packageId,p_delta:delta,p_reason:reason,p_expected:expected});if(error)throw error;return loadRemote();}
 export async function saveDailyRemote(report,counts,notes){const {error}=await supabase.rpc('save_cs_daily_report',{p_report:report,p_counts:counts,p_notes:notes});if(error)throw error;return loadRemote();}
