@@ -262,6 +262,18 @@ export function createLaporanBridgeHandler() {
       }
     }
 
+    // ── BotWA: catalog list (GET, shared secret) ──
+    if (action === 'catalog-list' && request.method === 'GET') {
+      const secret = request.headers.get('x-botwa-secret');
+      if (!secret || secret !== (env.BOTWA_SYNC_SECRET || '')) return respond({ error: 'Unauthorized' }, 401);
+      try {
+        const catalog = await db.query('catalog', { select: 'id,name', order: 'name.asc' });
+        return respond({ products: catalog.map(c => ({ id: c.id, name: c.name })) });
+      } catch (err) {
+        return respond({ error: err.message || 'Gagal memuat katalog' }, 500);
+      }
+    }
+
     // ── BotWA Sync (Supabase DB webhook, shared secret auth) ──
     if (action === 'botwa-sync' && request.method === 'POST') {
       const secret = request.headers.get('x-botwa-secret');
