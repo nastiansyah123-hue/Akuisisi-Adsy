@@ -282,10 +282,10 @@ export function createLaporanBridgeHandler() {
 
       const [products, users] = await Promise.all([
         bFetch(`products?id=eq.${productId}&select=id,laporan_advertiser,laporan_produk,laporan_platform,laporan_channel&limit=1`),
-        bFetch(`users?id=eq.${userId}&select=id,nama&limit=1`)
+        bFetch(`users?id=eq.${userId}&select=id,laporan_cs_nama&limit=1`)
       ]);
       const product = products[0];
-      const csNama  = users[0]?.nama;
+      const csNama  = users[0]?.laporan_cs_nama;
       if (!product?.laporan_advertiser || !product?.laporan_produk || !csNama) return null;
 
       const catalog  = await db.query('catalog', { name: `eq.${product.laporan_produk}`, select: 'id,name,unit,packages', limit: '1' });
