@@ -289,8 +289,18 @@ export function createLaporanBridgeHandler() {
       const platform = product.laporan_platform || 'Meta';
 
       const catalog  = await db.query('catalog', { name: `eq.${product.laporan_produk}`, select: 'id,name,unit,packages', limit: '1' });
-      if (!catalog[0]) return null; // produk belum ada di catalog Laporan Akuisisi
+      if (!catalog[0]) return null;
       const packages = (catalog[0]?.packages || []).filter(p => p.active !== false);
+
+      // Cari semua product_id BotWA (lintas user_id) dengan laporan config yang sama
+      // product_id adalah UUID unik global, jadi bisa filter tanpa user_id
+      const siblings = await bFetch(
+        `products?laporan_produk=eq.${encodeURIComponent(product.laporan_produk)}&laporan_advertiser=eq.${encodeURIComponent(product.laporan_advertiser)}&laporan_channel=eq.${encodeURIComponent(channel)}&laporan_platform=eq.${encodeURIComponent(platform)}&select=id`
+      );
+      const siblingIds = siblings.map(p => p.id);
+      const pidFilter  = siblingIds.length > 1
+        ? `product_id=in.(${siblingIds.join(',')})`
+        : `product_id=eq.${productId}`;
 
       // Pastikan assignment CS AI ada (FK requirement dari reports)
       await db.upsert('assignments', {
@@ -303,9 +313,10 @@ export function createLaporanBridgeHandler() {
         active: true
       }, 'cs,product,advertiser,channel,platform');
 
+      // Query orders & leads tanpa user_id filter — cukup product_id=in.(...) karena UUID unik global
       const [ordersRaw, leadsRaw] = await Promise.all([
-        bFetch(`orders_new?user_id=eq.${userId}&product_id=eq.${productId}&status=neq.batal&created_at=gte.${encodeURIComponent(dayStart)}&created_at=lte.${encodeURIComponent(dayEnd)}&select=id,qty`),
-        bFetch(`conversations?user_id=eq.${userId}&product_id=eq.${productId}&state->>is_form_lead=eq.true&created_at=gte.${encodeURIComponent(dayStart)}&created_at=lte.${encodeURIComponent(dayEnd)}&select=id,state`)
+        bFetch(`orders_new?${pidFilter}&status=neq.batal&created_at=gte.${encodeURIComponent(dayStart)}&created_at=lte.${encodeURIComponent(dayEnd)}&select=id,qty`),
+        bFetch(`conversations?${pidFilter}&state->>is_form_lead=eq.true&created_at=gte.${encodeURIComponent(dayStart)}&created_at=lte.${encodeURIComponent(dayEnd)}&select=id,state`)
       ]);
 
       const packageLines = packages.map(pkg => ({
