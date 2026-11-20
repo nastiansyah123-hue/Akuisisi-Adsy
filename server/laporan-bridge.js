@@ -262,124 +262,128 @@ export function createLaporanBridgeHandler() {
       }
     }
 
-    // ── BotWA Sync (Supabase DB webhook, shared secret auth) ──
+    // ── BotWA Sync helpers ──
+    const botwaUrl = (env.BOTWA_SUPABASE_URL || '').replace(/\/$/, '');
+    const botwaKey = env.BOTWA_SUPABASE_SERVICE_KEY;
+
+    const bFetch = async (path) => {
+      const r = await fetch(`${botwaUrl}/rest/v1/${path}`, {
+        headers: { apikey: botwaKey, Authorization: `Bearer ${botwaKey}` },
+        signal: AbortSignal.timeout(10000)
+      });
+      if (!r.ok) throw new Error(`BotWA ${path.split('?')[0]}: ${r.status}`);
+      return r.json();
+    };
+
+    // Sync satu kombinasi (userId, productId, dateStr) ke Laporan Akuisisi
+    async function syncOne(userId, productId, dateStr) {
+      const dayStart = `${dateStr}T00:00:00+07:00`;
+      const dayEnd   = `${dateStr}T23:59:59.999+07:00`;
+
+      const [products, users] = await Promise.all([
+        bFetch(`products?id=eq.${productId}&select=id,laporan_advertiser,laporan_produk,laporan_platform,laporan_channel&limit=1`),
+        bFetch(`users?id=eq.${userId}&select=id,nama&limit=1`)
+      ]);
+      const product = products[0];
+      const csNama  = users[0]?.nama;
+      if (!product?.laporan_advertiser || !product?.laporan_produk || !csNama) return null;
+
+      const catalog  = await db.query('catalog', { name: `eq.${product.laporan_produk}`, select: 'id,name,unit,packages', limit: '1' });
+      const packages = (catalog[0]?.packages || []).filter(p => p.active !== false);
+
+      const [ordersRaw, leadsRaw] = await Promise.all([
+        bFetch(`orders_new?user_id=eq.${userId}&product_id=eq.${productId}&status=neq.batal&created_at=gte.${encodeURIComponent(dayStart)}&created_at=lte.${encodeURIComponent(dayEnd)}&select=id,qty`),
+        bFetch(`conversations?user_id=eq.${userId}&product_id=eq.${productId}&state->>is_form_lead=eq.true&created_at=gte.${encodeURIComponent(dayStart)}&created_at=lte.${encodeURIComponent(dayEnd)}&select=id,state`)
+      ]);
+
+      const packageLines = packages.map(pkg => ({
+        id: pkg.id,
+        orders: ordersRaw.filter(o => parseInt(o.qty) === pkg.units).length,
+        canceled: 0
+      }));
+      const leadCount = leadsRaw.filter(c => !c.state?.skipped).length;
+      const channel   = product.laporan_channel || 'CTWA';
+      const platform  = product.laporan_platform || 'Meta';
+
+      const existing = await db.query('reports', {
+        date: `eq.${dateStr}`, cs: `ilike.${csNama}`,
+        product: `eq.${product.laporan_produk}`, advertiser: `eq.${product.laporan_advertiser}`,
+        channel: `eq.${channel}`, platform: `eq.${platform}`, select: 'id', limit: '1'
+      });
+
+      const closing = packageLines.reduce((s, l) => s + l.orders, 0);
+      if (existing.length) {
+        await db.update('reports', existing[0].id, { leads: leadCount, packageLines });
+      } else {
+        await db.insert('reports', {
+          id: crypto.randomUUID(), date: dateStr, cs: csNama,
+          product: product.laporan_produk, advertiser: product.laporan_advertiser,
+          channel, platform, leads: leadCount, notes: '',
+          packageLines, originalPackageLines: packageLines, originalLeads: leadCount
+        });
+      }
+      return { cs: csNama, product: product.laporan_produk, closing, leads: leadCount };
+    }
+
+    // ── BotWA Sync (Supabase DB webhook) ──
     if (action === 'botwa-sync' && request.method === 'POST') {
       const secret = request.headers.get('x-botwa-secret');
-      if (!secret || secret !== (env.BOTWA_SYNC_SECRET || '')) {
-        return respond({ error: 'Unauthorized' }, 401);
-      }
+      if (!secret || secret !== (env.BOTWA_SYNC_SECRET || '')) return respond({ error: 'Unauthorized' }, 401);
+      if (!botwaUrl || !botwaKey) return respond({ error: 'BotWA Supabase not configured' }, 503);
       try {
-        const body = await request.json();
-        const { type, table, record } = body;
+        const { table, record } = await request.json();
         if (!record) return respond({ ok: true, skipped: 'no_record' });
-
-        // conversations INSERT: only process form leads
-        if (table === 'conversations') {
-          if (!record.state?.is_form_lead) return respond({ ok: true, skipped: 'not_form_lead' });
-        }
-
-        const productId = record.product_id;
-        const userId = record.user_id;
-        if (!productId || !userId) return respond({ ok: true, skipped: 'missing_ids' });
-
-        // Convert UTC created_at → WIB date (UTC+7)
-        const recordDate = new Date(record.created_at);
-        const wibDate = new Date(recordDate.getTime() + 7 * 3600000);
-        const dateStr = wibDate.toISOString().substring(0, 10);
-        const dayStart = `${dateStr}T00:00:00+07:00`;
-        const dayEnd = `${dateStr}T23:59:59.999+07:00`;
-
-        // BotWA Supabase fetch helper
-        const botwaUrl = (env.BOTWA_SUPABASE_URL || '').replace(/\/$/, '');
-        const botwaKey = env.BOTWA_SUPABASE_SERVICE_KEY;
-        if (!botwaUrl || !botwaKey) return respond({ error: 'BotWA Supabase not configured' }, 503);
-
-        const bFetch = async (path) => {
-          const r = await fetch(`${botwaUrl}/rest/v1/${path}`, {
-            headers: { apikey: botwaKey, Authorization: `Bearer ${botwaKey}` },
-            signal: AbortSignal.timeout(8000)
-          });
-          if (!r.ok) throw new Error(`BotWA ${path.split('?')[0]}: ${r.status}`);
-          return r.json();
-        };
-
-        // Get product laporan config
-        const products = await bFetch(`products?id=eq.${productId}&select=id,nama,harga_bundling,laporan_advertiser,laporan_produk,laporan_platform,laporan_channel&limit=1`);
-        const product = products[0];
-        if (!product?.laporan_advertiser || !product?.laporan_produk) {
-          return respond({ ok: true, skipped: 'no_laporan_config' });
-        }
-
-        // Get CS name from BotWA users
-        const users = await bFetch(`users?id=eq.${userId}&select=id,nama&limit=1`);
-        const csNama = users[0]?.nama;
-        if (!csNama) return respond({ ok: true, skipped: 'no_cs' });
-
-        // Get catalog from Laporan Akuisisi
-        const catalog = await db.query('catalog', {
-          name: `eq.${product.laporan_produk}`,
-          select: 'id,name,unit,packages',
-          limit: '1'
-        });
-        const packages = (catalog[0]?.packages || []).filter(p => p.active !== false);
-
-        // Count BotWA orders for this day+cs+product (not batal)
-        const ordersRaw = await bFetch(
-          `orders_new?user_id=eq.${userId}&product_id=eq.${productId}&status=neq.batal&created_at=gte.${encodeURIComponent(dayStart)}&created_at=lte.${encodeURIComponent(dayEnd)}&select=id,qty`
-        );
-
-        // Build packageLines: match BotWA order qty → catalog package units
-        const packageLines = packages.map(pkg => ({
-          id: pkg.id,
-          orders: ordersRaw.filter(o => parseInt(o.qty) === pkg.units).length,
-          canceled: 0
-        }));
-
-        // Count leads (is_form_lead=true, not skipped) for this day+cs+product
-        const leadsRaw = await bFetch(
-          `conversations?user_id=eq.${userId}&product_id=eq.${productId}&state->>is_form_lead=eq.true&created_at=gte.${encodeURIComponent(dayStart)}&created_at=lte.${encodeURIComponent(dayEnd)}&select=id,state`
-        );
-        const leadCount = leadsRaw.filter(c => !c.state?.skipped).length;
-
-        const channel = product.laporan_channel || 'CTWA';
-        const platform = product.laporan_platform || 'Meta';
-
-        // Check existing report
-        const existing = await db.query('reports', {
-          date: `eq.${dateStr}`,
-          cs: `ilike.${csNama}`,
-          product: `eq.${product.laporan_produk}`,
-          advertiser: `eq.${product.laporan_advertiser}`,
-          channel: `eq.${channel}`,
-          platform: `eq.${platform}`,
-          select: 'id',
-          limit: '1'
-        });
-
-        const closing = packageLines.reduce((s, l) => s + l.orders, 0);
-
-        if (existing.length) {
-          await db.update('reports', existing[0].id, { leads: leadCount, packageLines });
-        } else {
-          await db.insert('reports', {
-            id: crypto.randomUUID(),
-            date: dateStr,
-            cs: csNama,
-            product: product.laporan_produk,
-            advertiser: product.laporan_advertiser,
-            channel,
-            platform,
-            leads: leadCount,
-            notes: '',
-            packageLines,
-            originalPackageLines: packageLines,
-            originalLeads: leadCount
-          });
-        }
-
-        return respond({ ok: true, synced: { date: dateStr, cs: csNama, closing, leads: leadCount } });
+        if (table === 'conversations' && !record.state?.is_form_lead) return respond({ ok: true, skipped: 'not_form_lead' });
+        const { product_id, user_id, created_at } = record;
+        if (!product_id || !user_id) return respond({ ok: true, skipped: 'missing_ids' });
+        const wib = new Date(new Date(created_at).getTime() + 7 * 3600000);
+        const dateStr = wib.toISOString().substring(0, 10);
+        const result = await syncOne(user_id, product_id, dateStr);
+        if (!result) return respond({ ok: true, skipped: 'no_laporan_config' });
+        return respond({ ok: true, synced: { date: dateStr, ...result } });
       } catch (err) {
         return respond({ error: err.message || 'Sync error' }, 500);
+      }
+    }
+
+    // ── BotWA Backfill (manual, per tanggal) ──
+    if (action === 'botwa-backfill' && request.method === 'POST') {
+      const secret = request.headers.get('x-botwa-secret');
+      if (!secret || secret !== (env.BOTWA_SYNC_SECRET || '')) return respond({ error: 'Unauthorized' }, 401);
+      if (!botwaUrl || !botwaKey) return respond({ error: 'BotWA Supabase not configured' }, 503);
+      try {
+        const { date } = await request.json();
+        if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return respond({ error: 'Format date harus YYYY-MM-DD' }, 400);
+        const dayStart = `${date}T00:00:00+07:00`;
+        const dayEnd   = `${date}T23:59:59.999+07:00`;
+
+        // Ambil semua kombinasi (user_id, product_id) yang aktif di tanggal itu
+        const [orders, convs] = await Promise.all([
+          bFetch(`orders_new?created_at=gte.${encodeURIComponent(dayStart)}&created_at=lte.${encodeURIComponent(dayEnd)}&select=user_id,product_id`),
+          bFetch(`conversations?state->>is_form_lead=eq.true&created_at=gte.${encodeURIComponent(dayStart)}&created_at=lte.${encodeURIComponent(dayEnd)}&select=user_id,product_id`)
+        ]);
+
+        // Deduplicate pairs
+        const seen = new Set();
+        const pairs = [];
+        for (const r of [...orders, ...convs]) {
+          const key = `${r.user_id}::${r.product_id}`;
+          if (!seen.has(key) && r.user_id && r.product_id) { seen.add(key); pairs.push(r); }
+        }
+
+        const results = [];
+        for (const { user_id, product_id } of pairs) {
+          try {
+            const r = await syncOne(user_id, product_id, date);
+            if (r) results.push(r);
+          } catch (e) {
+            results.push({ error: e.message, user_id, product_id });
+          }
+        }
+
+        return respond({ ok: true, date, total: pairs.length, synced: results });
+      } catch (err) {
+        return respond({ error: err.message || 'Backfill error' }, 500);
       }
     }
 
