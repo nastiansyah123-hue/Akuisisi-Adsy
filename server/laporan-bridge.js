@@ -285,8 +285,23 @@ export function createLaporanBridgeHandler() {
       const csNama  = 'CS AI';
       if (!product?.laporan_advertiser || !product?.laporan_produk) return null;
 
+      const channel  = product.laporan_channel || 'CTWA';
+      const platform = product.laporan_platform || 'Meta';
+
       const catalog  = await db.query('catalog', { name: `eq.${product.laporan_produk}`, select: 'id,name,unit,packages', limit: '1' });
+      if (!catalog[0]) return null; // produk belum ada di catalog Laporan Akuisisi
       const packages = (catalog[0]?.packages || []).filter(p => p.active !== false);
+
+      // Pastikan assignment CS AI ada (FK requirement dari reports)
+      await db.upsert('assignments', {
+        id: crypto.randomUUID(),
+        cs: csNama,
+        product: product.laporan_produk,
+        advertiser: product.laporan_advertiser,
+        channel,
+        platform,
+        active: true
+      }, 'cs,product,advertiser,channel,platform');
 
       const [ordersRaw, leadsRaw] = await Promise.all([
         bFetch(`orders_new?user_id=eq.${userId}&product_id=eq.${productId}&status=neq.batal&created_at=gte.${encodeURIComponent(dayStart)}&created_at=lte.${encodeURIComponent(dayEnd)}&select=id,qty`),
@@ -299,8 +314,6 @@ export function createLaporanBridgeHandler() {
         canceled: 0
       }));
       const leadCount = leadsRaw.filter(c => !c.state?.skipped).length;
-      const channel   = product.laporan_channel || 'CTWA';
-      const platform  = product.laporan_platform || 'Meta';
 
       const existing = await db.query('reports', {
         date: `eq.${dateStr}`, cs: `ilike.${csNama}`,
