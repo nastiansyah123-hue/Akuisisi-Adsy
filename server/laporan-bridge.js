@@ -196,7 +196,7 @@ export function createLaporanBridgeHandler() {
         headers: {
           'Access-Control-Allow-Origin': '*',
           'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, X-CS-Token, X-Admin-Token, X-Advertiser-Token',
+          'Access-Control-Allow-Headers': 'Content-Type, X-CS-Token, X-Admin-Token, X-Advertiser-Token, x-botwa-secret',
           'Access-Control-Max-Age': '86400'
         }
       });
@@ -259,6 +259,127 @@ export function createLaporanBridgeHandler() {
         return respond({ advNames: unique.map(name => ({ name })) });
       } catch (err) {
         return respond({ error: err.message || 'Gagal memuat daftar advertiser' }, 500);
+      }
+    }
+
+    // ── BotWA Sync (Supabase DB webhook, shared secret auth) ──
+    if (action === 'botwa-sync' && request.method === 'POST') {
+      const secret = request.headers.get('x-botwa-secret');
+      if (!secret || secret !== (env.BOTWA_SYNC_SECRET || '')) {
+        return respond({ error: 'Unauthorized' }, 401);
+      }
+      try {
+        const body = await request.json();
+        const { type, table, record } = body;
+        if (!record) return respond({ ok: true, skipped: 'no_record' });
+
+        // conversations INSERT: only process form leads
+        if (table === 'conversations') {
+          if (!record.state?.is_form_lead) return respond({ ok: true, skipped: 'not_form_lead' });
+        }
+
+        const productId = record.product_id;
+        const userId = record.user_id;
+        if (!productId || !userId) return respond({ ok: true, skipped: 'missing_ids' });
+
+        // Convert UTC created_at → WIB date (UTC+7)
+        const recordDate = new Date(record.created_at);
+        const wibDate = new Date(recordDate.getTime() + 7 * 3600000);
+        const dateStr = wibDate.toISOString().substring(0, 10);
+        const dayStart = `${dateStr}T00:00:00+07:00`;
+        const dayEnd = `${dateStr}T23:59:59.999+07:00`;
+
+        // BotWA Supabase fetch helper
+        const botwaUrl = (env.BOTWA_SUPABASE_URL || '').replace(/\/$/, '');
+        const botwaKey = env.BOTWA_SUPABASE_SERVICE_KEY;
+        if (!botwaUrl || !botwaKey) return respond({ error: 'BotWA Supabase not configured' }, 503);
+
+        const bFetch = async (path) => {
+          const r = await fetch(`${botwaUrl}/rest/v1/${path}`, {
+            headers: { apikey: botwaKey, Authorization: `Bearer ${botwaKey}` },
+            signal: AbortSignal.timeout(8000)
+          });
+          if (!r.ok) throw new Error(`BotWA ${path.split('?')[0]}: ${r.status}`);
+          return r.json();
+        };
+
+        // Get product laporan config
+        const products = await bFetch(`products?id=eq.${productId}&select=id,nama,harga_bundling,laporan_advertiser,laporan_produk,laporan_platform,laporan_channel&limit=1`);
+        const product = products[0];
+        if (!product?.laporan_advertiser || !product?.laporan_produk) {
+          return respond({ ok: true, skipped: 'no_laporan_config' });
+        }
+
+        // Get CS name from BotWA users
+        const users = await bFetch(`users?id=eq.${userId}&select=id,nama&limit=1`);
+        const csNama = users[0]?.nama;
+        if (!csNama) return respond({ ok: true, skipped: 'no_cs' });
+
+        // Get catalog from Laporan Akuisisi
+        const catalog = await db.query('catalog', {
+          name: `eq.${product.laporan_produk}`,
+          select: 'id,name,unit,packages',
+          limit: '1'
+        });
+        const packages = (catalog[0]?.packages || []).filter(p => p.active !== false);
+
+        // Count BotWA orders for this day+cs+product (not batal)
+        const ordersRaw = await bFetch(
+          `orders_new?user_id=eq.${userId}&product_id=eq.${productId}&status=neq.batal&created_at=gte.${encodeURIComponent(dayStart)}&created_at=lte.${encodeURIComponent(dayEnd)}&select=id,qty`
+        );
+
+        // Build packageLines: match BotWA order qty → catalog package units
+        const packageLines = packages.map(pkg => ({
+          id: pkg.id,
+          orders: ordersRaw.filter(o => parseInt(o.qty) === pkg.units).length,
+          canceled: 0
+        }));
+
+        // Count leads (is_form_lead=true, not skipped) for this day+cs+product
+        const leadsRaw = await bFetch(
+          `conversations?user_id=eq.${userId}&product_id=eq.${productId}&state->>is_form_lead=eq.true&created_at=gte.${encodeURIComponent(dayStart)}&created_at=lte.${encodeURIComponent(dayEnd)}&select=id,state`
+        );
+        const leadCount = leadsRaw.filter(c => !c.state?.skipped).length;
+
+        const channel = product.laporan_channel || 'CTWA';
+        const platform = product.laporan_platform || 'Meta';
+
+        // Check existing report
+        const existing = await db.query('reports', {
+          date: `eq.${dateStr}`,
+          cs: `ilike.${csNama}`,
+          product: `eq.${product.laporan_produk}`,
+          advertiser: `eq.${product.laporan_advertiser}`,
+          channel: `eq.${channel}`,
+          platform: `eq.${platform}`,
+          select: 'id',
+          limit: '1'
+        });
+
+        const closing = packageLines.reduce((s, l) => s + l.orders, 0);
+
+        if (existing.length) {
+          await db.update('reports', existing[0].id, { leads: leadCount, packageLines });
+        } else {
+          await db.insert('reports', {
+            id: crypto.randomUUID(),
+            date: dateStr,
+            cs: csNama,
+            product: product.laporan_produk,
+            advertiser: product.laporan_advertiser,
+            channel,
+            platform,
+            leads: leadCount,
+            notes: '',
+            packageLines,
+            originalPackageLines: packageLines,
+            originalLeads: leadCount
+          });
+        }
+
+        return respond({ ok: true, synced: { date: dateStr, cs: csNama, closing, leads: leadCount } });
+      } catch (err) {
+        return respond({ error: err.message || 'Sync error' }, 500);
       }
     }
 
