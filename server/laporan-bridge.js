@@ -513,7 +513,8 @@ export function createLaporanBridgeHandler() {
             });
             if (!assign.length) return respond({ error: 'Tidak ada penugasan aktif untuk kombinasi ini.' }, 400);
 
-            // Validate & upsert each account row
+            // Validate all rows first
+            const rows = [];
             for (const item of items) {
               const budget = Number(item.budget);
               const tax = Number(item.tax ?? 11);
@@ -533,9 +534,19 @@ export function createLaporanBridgeHandler() {
                 tax
               };
               if (item.ad_account_name) row.ad_account_name = item.ad_account_name;
-              await db.upsert('ads', row, item.ad_account_name
-                ? 'date,product,advertiser,channel,platform,ad_account_name'
-                : 'date,product,advertiser,channel,platform');
+              rows.push(row);
+            }
+
+            // Delete existing rows for this date/product/advertiser/channel/platform, then insert fresh
+            await db.del('ads', {
+              date: `eq.${first.date}`,
+              product: `eq.${first.product}`,
+              advertiser: `eq.${adv.name}`,
+              channel: `eq.${first.channel}`,
+              platform: `eq.${platform}`
+            });
+            for (const row of rows) {
+              await db.insert('ads', row);
             }
 
             return respond({ ok: true });
