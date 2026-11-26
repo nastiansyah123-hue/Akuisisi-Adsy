@@ -524,7 +524,6 @@ export function createLaporanBridgeHandler() {
                 return respond({ error: `Pajak harus antara 0 dan 100 persen${item.ad_account_name ? ` (${item.ad_account_name})` : ''}.` }, 400);
               }
               const row = {
-                id: item.id || crypto.randomUUID(),
                 date: first.date,
                 product: first.product,
                 advertiser: adv.name,
