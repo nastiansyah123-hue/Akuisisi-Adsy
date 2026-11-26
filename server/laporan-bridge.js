@@ -537,16 +537,24 @@ export function createLaporanBridgeHandler() {
               rows.push(row);
             }
 
-            // Delete existing rows for this date/product/advertiser/channel/platform, then insert fresh
-            await db.del('ads', {
+            // Query existing rows, then update or insert each
+            const existing = await db.query('ads', {
               date: `eq.${first.date}`,
               product: `eq.${first.product}`,
-              advertiser: `eq.${adv.name}`,
+              advertiser: `ilike.${adv.name}`,
               channel: `eq.${first.channel}`,
-              platform: `eq.${platform}`
+              platform: `eq.${platform}`,
+              select: 'id,ad_account_name'
             });
             for (const row of rows) {
-              await db.insert('ads', row);
+              const match = existing.find(e =>
+                (e.ad_account_name || '') === (row.ad_account_name || '')
+              );
+              if (match) {
+                await db.update('ads', match.id, { budget: row.budget, tax: row.tax });
+              } else {
+                await db.insert('ads', row);
+              }
             }
 
             return respond({ ok: true });
