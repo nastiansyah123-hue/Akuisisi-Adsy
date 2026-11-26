@@ -471,6 +471,17 @@ export function createLaporanBridgeHandler() {
             return respond({ ads });
           }
 
+          // Lightweight check: which ad_account_names have reported for a specific date
+          if (action === 'check-ads') {
+            const date = reqUrl.searchParams.get('date');
+            if (!date) return respond({ error: 'Parameter date diperlukan' }, 400);
+            const ads = await db.query('ads', {
+              advertiser: `ilike.${adv.name}`, date: `eq.${date}`,
+              select: 'ad_account_name,product,channel,platform,budget,tax'
+            });
+            return respond({ ads });
+          }
+
           return respond({ error: 'Action tidak dikenal' }, 400);
         }
 
@@ -478,21 +489,17 @@ export function createLaporanBridgeHandler() {
           const body = await request.json();
 
           if (action === 'save-ads') {
-            const { ad } = body;
-            if (!ad) return respond({ error: 'Data biaya iklan diperlukan' }, 400);
-            if (!ad.date || !ad.product || !ad.channel) {
+            const { ad, ads: adsArr } = body;
+            // Support array (per-account) or single object (backward compat)
+            const items = adsArr || (ad ? [ad] : null);
+            if (!items || !items.length) return respond({ error: 'Data biaya iklan diperlukan' }, 400);
+
+            const first = items[0];
+            if (!first.date || !first.product || !first.channel) {
               return respond({ error: 'Lengkapi tanggal, produk, dan channel.' }, 400);
             }
-            const platform = ad.platform || 'Meta';
-            const budget = Number(ad.budget);
-            const tax = Number(ad.tax ?? 11);
-            if (!Number.isFinite(budget) || budget < 0) {
-              return respond({ error: 'Biaya iklan harus nol atau lebih.' }, 400);
-            }
-            if (!Number.isFinite(tax) || tax < 0 || tax > 100) {
-              return respond({ error: 'Pajak harus antara 0 dan 100 persen.' }, 400);
-            }
-            if (!['Web', 'CTWA'].includes(ad.channel)) {
+            const platform = first.platform || 'Meta';
+            if (!['Web', 'CTWA'].includes(first.channel)) {
               return respond({ error: 'Channel harus Web atau CTWA.' }, 400);
             }
             if (!['Meta', 'Google', 'TikTok'].includes(platform)) {
@@ -500,22 +507,37 @@ export function createLaporanBridgeHandler() {
             }
             // Verify assignment exists
             const assign = await db.query('assignments', {
-              product: `eq.${ad.product}`, advertiser: `ilike.${adv.name}`,
-              channel: `eq.${ad.channel}`, platform: `eq.${platform}`, active: 'eq.true',
+              product: `eq.${first.product}`, advertiser: `ilike.${adv.name}`,
+              channel: `eq.${first.channel}`, platform: `eq.${platform}`, active: 'eq.true',
               select: 'id', limit: '1'
             });
             if (!assign.length) return respond({ error: 'Tidak ada penugasan aktif untuk kombinasi ini.' }, 400);
 
-            await db.upsert('ads', {
-              id: ad.id || crypto.randomUUID(),
-              date: ad.date,
-              product: ad.product,
-              advertiser: adv.name,
-              channel: ad.channel,
-              platform,
-              budget,
-              tax
-            }, 'date,product,advertiser,channel,platform');
+            // Validate & upsert each account row
+            for (const item of items) {
+              const budget = Number(item.budget);
+              const tax = Number(item.tax ?? 11);
+              if (!Number.isFinite(budget) || budget < 0) {
+                return respond({ error: `Biaya iklan harus nol atau lebih${item.ad_account_name ? ` (${item.ad_account_name})` : ''}.` }, 400);
+              }
+              if (!Number.isFinite(tax) || tax < 0 || tax > 100) {
+                return respond({ error: `Pajak harus antara 0 dan 100 persen${item.ad_account_name ? ` (${item.ad_account_name})` : ''}.` }, 400);
+              }
+              const row = {
+                id: item.id || crypto.randomUUID(),
+                date: first.date,
+                product: first.product,
+                advertiser: adv.name,
+                channel: first.channel,
+                platform,
+                budget,
+                tax
+              };
+              if (item.ad_account_name) row.ad_account_name = item.ad_account_name;
+              await db.upsert('ads', row, item.ad_account_name
+                ? 'date,product,advertiser,channel,platform,ad_account_name'
+                : 'date,product,advertiser,channel,platform');
+            }
 
             return respond({ ok: true });
           }
