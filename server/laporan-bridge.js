@@ -533,7 +533,8 @@ export function createLaporanBridgeHandler() {
                 budget,
                 tax
               };
-              if (item.ad_account_name) row.ad_account_name = item.ad_account_name;
+              if (!item.ad_account_name) return respond({ error: 'Nama akun iklan wajib diisi.' }, 400);
+              row.ad_account_name = item.ad_account_name;
               rows.push(row);
             }
 
