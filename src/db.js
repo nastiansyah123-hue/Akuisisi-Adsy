@@ -63,5 +63,20 @@ export async function saveAiEvaluations(periodStart,periodEnd,texts){
   if(error)console.error('Save AI evaluations error:',error);
 }
 
+export async function syncBotWA(start,end){
+  if(!supabase)throw new Error('Hanya tersedia setelah Supabase dihubungkan.');
+  const session=await supabase.auth.getSession();
+  const token=session?.data?.session?.access_token;
+  if(!token)throw new Error('Belum login.');
+  const res=await fetch('/api/laporan-bridge?action=admin-sync',{
+    method:'POST',
+    headers:{'X-Admin-Token':token,'Content-Type':'application/json'},
+    body:JSON.stringify({start,end})
+  });
+  const data=await res.json();
+  if(!res.ok)throw new Error(data.error||`HTTP ${res.status}`);
+  return data;
+}
+
 export async function correctRemote({reportId,packageId,delta,reason,expected}){const {error}=await supabase.rpc('correct_package',{p_report_id:reportId,p_package_id:packageId,p_delta:delta,p_reason:reason,p_expected:expected});if(error)throw error;return loadRemote();}
 export async function saveDailyRemote(report,counts,notes){const {error}=await supabase.rpc('save_cs_daily_report',{p_report:report,p_counts:counts,p_notes:notes});if(error)throw error;return loadRemote();}
