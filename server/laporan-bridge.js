@@ -346,6 +346,55 @@ export function createLaporanBridgeHandler() {
       return { cs: csNama, product: product.laporan_produk, closing, leads: leadCount };
     }
 
+    // ── Admin Manual Sync (authenticated via admin token) ──
+    if (action === 'admin-sync' && request.method === 'POST') {
+      const adminToken = request.headers.get('X-Admin-Token');
+      if (!adminToken) return respond({ error: 'Admin token diperlukan' }, 401);
+      const admin = await verifyAdminToken(env, adminToken);
+      if (!admin) return respond({ error: 'Bukan admin atau token tidak valid' }, 403);
+      if (!botwaUrl || !botwaKey) return respond({ error: 'BotWA Supabase not configured' }, 503);
+      try {
+        const { start, end } = await request.json();
+        if (!start || !end || !/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
+          return respond({ error: 'Format start/end harus YYYY-MM-DD' }, 400);
+        }
+        // Limit range to 31 days
+        const d1 = new Date(start), d2 = new Date(end);
+        if (d2 < d1) return respond({ error: 'end harus >= start' }, 400);
+        if ((d2 - d1) / 86400000 > 31) return respond({ error: 'Maksimal 31 hari per sync' }, 400);
+
+        const allResults = [];
+        const cur = new Date(d1);
+        while (cur <= d2) {
+          const dateStr = cur.toISOString().substring(0, 10);
+          const dayStart = `${dateStr}T00:00:00+07:00`;
+          const dayEnd   = `${dateStr}T23:59:59.999+07:00`;
+          const [orders, convs] = await Promise.all([
+            bFetch(`orders_new?created_at=gte.${encodeURIComponent(dayStart)}&created_at=lte.${encodeURIComponent(dayEnd)}&select=user_id,product_id`),
+            bFetch(`conversations?state->>is_form_lead=eq.true&created_at=gte.${encodeURIComponent(dayStart)}&created_at=lte.${encodeURIComponent(dayEnd)}&select=user_id,product_id`)
+          ]);
+          const seen = new Set();
+          const pairs = [];
+          for (const r of [...orders, ...convs]) {
+            const key = `${r.user_id}::${r.product_id}`;
+            if (!seen.has(key) && r.user_id && r.product_id) { seen.add(key); pairs.push(r); }
+          }
+          for (const { user_id, product_id } of pairs) {
+            try {
+              const r = await syncOne(user_id, product_id, dateStr);
+              if (r) allResults.push({ date: dateStr, ...r });
+            } catch (e) {
+              allResults.push({ date: dateStr, error: e.message, user_id, product_id });
+            }
+          }
+          cur.setDate(cur.getDate() + 1);
+        }
+        return respond({ ok: true, start, end, synced: allResults });
+      } catch (err) {
+        return respond({ error: err.message || 'Sync error' }, 500);
+      }
+    }
+
     // ── BotWA Sync (Supabase DB webhook) ──
     if (action === 'botwa-sync' && request.method === 'POST') {
       const secret = request.headers.get('x-botwa-secret');
